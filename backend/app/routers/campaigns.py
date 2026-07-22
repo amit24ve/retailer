@@ -48,6 +48,7 @@ async def create_campaign(
         "segment": body.get("segment", "all"),
         "schedule": body.get("schedule", "now"),
         "scheduled_at": body.get("scheduled_at", ""),
+        "image": body.get("image", ""),
         "sent": 0,
         "failed": 0,
         "opened": 0,

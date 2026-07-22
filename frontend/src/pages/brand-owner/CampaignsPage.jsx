@@ -947,6 +947,49 @@ function TemplateLibrary({ onCreateCampaign, campaigns = [] }) {
 function CampaignPerformance({ onCreateCampaign, onEditCampaign, onViewCampaign, onDeleteCampaign, campaigns = [], loading }) {
   const [dateRange, setDateRange] = useState('Last 30 Days');
   const [showDropdown, setShowDropdown] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+
+  const handleExportCSV = () => {
+    const startMs = exportStartDate ? new Date(exportStartDate).getTime() : 0;
+    const endMs = exportEndDate ? new Date(exportEndDate + 'T23:59:59').getTime() : Date.now();
+
+    const filtered = allCampaigns.filter(c => {
+      if (!c._raw.created_at) return false;
+      const t = new Date(c._raw.created_at).getTime();
+      return t >= startMs && t <= endMs;
+    });
+
+    if (filtered.length === 0) {
+      toast.error("No campaigns found in selected date range to export.");
+      return;
+    }
+
+    const headers = ["Campaign Name", "Status", "Channels", "Sent", "Delivered", "Read", "Clicked", "Converted", "Revenue (INR)", "Date"];
+    const rows = filtered.map(c => [
+      `"${c.name.replace(/"/g, '""')}"`,
+      c.status,
+      c.channelText,
+      c.sent,
+      c.delivered,
+      c.read,
+      c.clicked,
+      c.converted,
+      c.revenue,
+      c.date
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `campaigns_report_${exportStartDate || 'all'}_to_${exportEndDate || 'today'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Campaign data exported successfully!");
+  };
 
   // Map database campaigns
   const allCampaigns = campaigns.map(c => {
@@ -1086,14 +1129,48 @@ function CampaignPerformance({ onCreateCampaign, onEditCampaign, onViewCampaign,
       {/* Campaign table */}
       {hasCampaigns ? (
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h2 className="text-base font-bold text-slate-900">All Campaigns</h2>
-            <button
-              onClick={() => onCreateCampaign(null)}
-              className="flex items-center gap-1.5 text-sm font-bold text-white bg-cyan-500 hover:bg-cyan-600 px-4 py-2 rounded-xl transition-colors"
-            >
-              <PlusIcon className="w-4 h-4" /> New Campaign
-            </button>
+          <div className="px-5 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">All Campaigns</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Manage and export your campaign reports</p>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Date Filter for Export */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={exportStartDate}
+                  onChange={e => setExportStartDate(e.target.value)}
+                  className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                  title="Filter start date"
+                />
+                <span className="text-xs text-slate-400">to</span>
+                <input
+                  type="date"
+                  value={exportEndDate}
+                  onChange={e => setExportEndDate(e.target.value)}
+                  className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                  title="Filter end date"
+                />
+              </div>
+
+              {/* Excel Export Button */}
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-2 rounded-xl transition-all shadow-sm cursor-pointer"
+              >
+                📥 Export Excel
+              </button>
+
+              <button
+                onClick={() => onCreateCampaign(null)}
+                className="flex items-center gap-1.5 text-xs font-bold text-white bg-cyan-500 hover:bg-cyan-600 px-4 py-2 rounded-xl transition-all shadow-sm"
+              >
+                <PlusIcon className="w-4 h-4" /> New Campaign
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

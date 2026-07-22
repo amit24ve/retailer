@@ -368,21 +368,69 @@ async def send_to_customer_channels(
                     from app.core.email import send_email
 
                     campaign_subject = "Special Campaign Offer"
+                    campaign_image = None
                     if campaign_id:
-                        campaign_doc = await db["campaigns"].find_one({"campaign_id": campaign_id}, {"name": 1})
-                        if campaign_doc and campaign_doc.get("name"):
-                            campaign_subject = campaign_doc.get("name")
+                        campaign_doc = await db["campaigns"].find_one({"campaign_id": campaign_id}, {"name": 1, "image": 1})
+                        if campaign_doc:
+                            if campaign_doc.get("name"):
+                                campaign_subject = campaign_doc.get("name")
+                            if campaign_doc.get("image"):
+                                campaign_image = campaign_doc.get("image")
 
                     brand = await db["brands"].find_one({"brand_id": brand_id}, {"name": 1})
                     brand_name = (brand or {}).get("name") or "Retailer"
 
+                    image_html = ""
+                    if campaign_image:
+                        image_html = f'<div style="text-align: center; margin-bottom: 20px;"><img src="{campaign_image}" style="width: 100%; max-width: 560px; height: auto; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.06);" alt="Offer Banner" /></div>'
+
                     html_content = f"""
-                    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
-                        <h2 style="color: #4f46e5; margin-bottom: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">{brand_name}</h2>
-                        <p style="font-size: 16px; line-height: 1.6; color: #334155; margin-bottom: 24px;">{message}</p>
-                        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-                        <p style="font-size: 12px; color: #94a3b8; text-align: center;">You received this email because you are a valued customer of {brand_name}.</p>
-                    </div>
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="utf-8">
+                        <title>{campaign_subject}</title>
+                    </head>
+                    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; padding: 40px 10px;">
+                            <tr>
+                                <td align="center">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05), 0 4px 6px -2px rgba(0,0,0,0.05); border: 1px solid #eef2f6;">
+                                        <!-- Header Banner -->
+                                        <tr>
+                                            <td style="background: linear-gradient(135deg, #0891b2 0%, #0369a1 100%); padding: 32px; text-align: center;">
+                                                <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase;">{brand_name}</h1>
+                                            </td>
+                                        </tr>
+                                        <!-- Content Body -->
+                                        <tr>
+                                            <td style="padding: 32px; background-color: #ffffff;">
+                                                {image_html}
+                                                <h2 style="color: #1e293b; margin-top: 0; margin-bottom: 16px; font-size: 22px; font-weight: 800; line-height: 1.3;">{campaign_subject}</h2>
+                                                <p style="font-size: 15px; line-height: 1.6; color: #475569; margin-bottom: 24px; white-space: pre-line;">{message}</p>
+                                                
+                                                <div style="text-align: center; margin: 32px 0 16px 0;">
+                                                    <a href="https://retailer.avopay.pro" style="background-color: #0891b2; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(8, 145, 178, 0.25);">Shop Exclusive Deals</a>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <!-- Footer -->
+                                        <tr>
+                                            <td style="background-color: #f8fafc; padding: 24px 32px; border-top: 1px solid #f1f5f9; text-align: center;">
+                                                <p style="font-size: 12px; color: #94a3b8; margin: 0; line-height: 1.5;">
+                                                    You received this email because you are a registered customer of <strong>{brand_name}</strong>.
+                                                </p>
+                                                <p style="font-size: 11px; color: #cbd5e1; margin-top: 8px; margin-bottom: 0;">
+                                                    &copy; {datetime.utcnow().year} {brand_name}. All rights reserved.
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </body>
+                    </html>
                     """
 
                     email_success = await send_email(
