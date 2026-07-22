@@ -7,6 +7,7 @@ import {
   MagnifyingGlassIcon, PlusIcon, FunnelIcon, ChevronDownIcon,
   ArrowUpIcon, ArrowDownIcon, ArrowsUpDownIcon, QuestionMarkCircleIcon,
   UserGroupIcon, SparklesIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon,
+  CalendarIcon,
 } from '@heroicons/react/24/outline';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -168,34 +169,83 @@ function SurfingIllustration() {
 
 // ─── Date range selector ──────────────────────────────────────────────────────
 function DateRangeSelect({ value, onChange, options, startDate, endDate, onStartDateChange, onEndDateChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  
   return (
-    <div className="flex items-center gap-2">
-      <div className="relative">
-        <select
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          className="appearance-none text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-300 cursor-pointer"
-        >
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-      </div>
-      {value === 'custom' && (
-        <div className="flex items-center gap-1.5 animate-slide-up">
-          <input
-            type="date"
-            value={startDate}
-            onChange={e => onStartDateChange(e.target.value)}
-            className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-          />
-          <span className="text-xs text-slate-400">to</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={e => onEndDateChange(e.target.value)}
-            className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-          />
-        </div>
+    <div className="relative">
+      <button 
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 hover:bg-slate-50 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-300 cursor-pointer shadow-sm"
+      >
+        <CalendarIcon className="w-4 h-4 text-slate-400" />
+        <span>
+          {value === 'custom' 
+            ? `${new Date(startDate).toLocaleDateString('en-IN', {day:'2-digit', month:'short'})} – ${new Date(endDate).toLocaleDateString('en-IN', {day:'2-digit', month:'short'})}`
+            : options.find(o => o.value === value)?.label.split('  ')[0]}
+        </span>
+        <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400" />
+      </button>
+      
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div className="absolute right-0 mt-2 bg-white border border-slate-200 shadow-xl rounded-2xl p-4 z-50 min-w-[280px] animate-slide-up space-y-3">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Select Range</p>
+            <div className="grid grid-cols-1 gap-1">
+              {options.map(o => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.value);
+                    if (o.value !== 'custom') setIsOpen(false);
+                  }}
+                  className={`w-full text-left text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors ${
+                    value === o.value 
+                      ? 'bg-cyan-50 text-cyan-600' 
+                      : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            
+            {value === 'custom' && (
+              <div className="border-t border-slate-100 pt-3 space-y-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Custom Dates</p>
+                <div className="space-y-1.5">
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-500 block mb-0.5">Start Date</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={e => onStartDateChange(e.target.value)}
+                      className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-500 block mb-0.5">End Date</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={e => onEndDateChange(e.target.value)}
+                      className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                    />
+                  </div>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="w-full mt-2 text-xs font-bold bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl py-1.5 transition-colors shadow-sm"
+                >
+                  Apply Range
+                </button>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
