@@ -289,7 +289,26 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
     schedule: template?.schedule || 'now',
     scheduled_at: template?.scheduled_at || '',
     channels: template?.channels || (template?.channel === 'sms' ? ['sms'] : ['whatsapp']),
+    customer_ids: [],
   });
+  const [customers, setCustomers] = useState([]);
+  
+  useEffect(() => {
+    api.get('/customers', { params: { limit: 1000 } })
+      .then(res => setCustomers(res.data.customers || []))
+      .catch(() => {});
+  }, []);
+
+  const allCount = customers.length;
+  const activeCount = customers.filter(c => c.created_at && new Date(c.created_at) > new Date(Date.now() - 90 * 86400000)).length;
+  const dormantCount = allCount - activeCount;
+  const championsCount = customers.filter(c => c.segment === 'Champions' || c.segment === 'champions').length;
+  const loyalCount = customers.filter(c => c.segment === 'Loyal' || c.segment === 'loyal').length;
+  const potentialCount = customers.filter(c => c.segment === 'Potential' || c.segment === 'potential').length;
+  const atRiskCount = customers.filter(c => c.segment === 'At Risk' || c.segment === 'At-Risk' || c.segment === 'at-risk').length;
+  const lostCount = customers.filter(c => c.segment === 'Lost' || c.segment === 'lost').length;
+  const goldPlusCount = customers.filter(c => c.loyalty_tier && ['Gold', 'Platinum', 'Diamond'].includes(c.loyalty_tier)).length;
+  const newCount = customers.filter(c => c.created_at && new Date(c.created_at) > new Date(Date.now() - 30 * 86400000)).length;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const toggleChannel = (channel) => {
     setForm((f) => {
@@ -333,6 +352,7 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
         scheduled_at: form.scheduled_at || '',
         channel: form.channels.length > 1 ? 'both' : form.channels[0],
         channels: form.channels,
+        customer_ids: form.segment === 'specific' ? form.customer_ids : [],
       };
 
       if (template?.isDbDraft && template?.id) {
@@ -350,6 +370,8 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
         const sendRes = await api.post(`/campaigns/${campaign.campaign_id}/send`, {
           message: form.message || '',
           channels: form.channels,
+          segment: form.segment || 'all',
+          customer_ids: form.segment === 'specific' ? form.customer_ids : null,
         });
         toast.success(`Campaign sent: ${sendRes.data.sent || 0} delivered, ${sendRes.data.failed || 0} failed`);
       } else {
@@ -580,16 +602,17 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
               <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Target Audience</label>
               <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
                 {[
-                  { v: 'all', label: 'All Customers', count: '1,24,822', desc: 'Send to your entire customer base', icon: '👥' },
-                  { v: 'active', label: 'Active Customers', count: '84,210', desc: 'Customers with purchase in last 90 days', icon: '✅' },
-                  { v: 'dormant', label: 'Dormant Customers', count: '32,480', desc: 'No purchase in last 90+ days', icon: '😴' },
-                  { v: 'champions', label: 'Champions Customers', count: '2,840', desc: 'High frequency, high spend customers', icon: '👑' },
-                  { v: 'loyal', label: 'Loyal Customers', count: '5,120', desc: 'Consistent buyers with moderate-to-high spend', icon: '❤️' },
-                  { v: 'potential', label: 'Potential Customers', count: '8,400', desc: 'Recent buyers with average spend', icon: '⚡' },
-                  { v: 'at-risk', label: 'At Risk Customers', count: '3,200', desc: 'Customers showing signs of churning', icon: '⚠️' },
-                  { v: 'lost', label: 'Lost Customers', count: '1,840', desc: 'Inactive customers, need aggressive win-back', icon: '❄️' },
-                  { v: 'gold-plus', label: 'Gold & Above', count: '4,082', desc: 'Gold, Platinum, Diamond tier members', icon: '🥇' },
-                  { v: 'new', label: 'New Customers', count: '8,420', desc: 'Joined in last 30 days', icon: '👋' },
+                  { v: 'all', label: 'All Customers', count: String(allCount), desc: 'Send to your entire customer base', icon: '👥' },
+                  { v: 'specific', label: 'Specific Customers', count: String(form.customer_ids.length), desc: 'Select individual target customers manually', icon: '👤' },
+                  { v: 'active', label: 'Active Customers', count: String(activeCount), desc: 'Customers with purchases in last 90 days', icon: '✅' },
+                  { v: 'dormant', label: 'Dormant Customers', count: String(dormantCount), desc: 'No purchases in last 90+ days', icon: '😴' },
+                  { v: 'champions', label: 'Champions Customers', count: String(championsCount), desc: 'High frequency, high spend customers', icon: '👑' },
+                  { v: 'loyal', label: 'Loyal Customers', count: String(loyalCount), desc: 'Consistent buyers with moderate-to-high spend', icon: '❤️' },
+                  { v: 'potential', label: 'Potential Customers', count: String(potentialCount), desc: 'Recent buyers with average spend', icon: '⚡' },
+                  { v: 'at-risk', label: 'At Risk Customers', count: String(atRiskCount), desc: 'Customers showing signs of churning', icon: '⚠️' },
+                  { v: 'lost', label: 'Lost Customers', count: String(lostCount), desc: 'Inactive customers, need aggressive win-back', icon: '❄️' },
+                  { v: 'gold-plus', label: 'Gold & Above', count: String(goldPlusCount), desc: 'Gold, Platinum, Diamond tier members', icon: '🥇' },
+                  { v: 'new', label: 'New Customers', count: String(newCount), desc: 'Joined in last 30 days', icon: '👋' },
                 ].map(seg => (
                   <label key={seg.v} className={`flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${form.segment === seg.v ? 'border-yellow-600 bg-cyan-50' : 'border-slate-200 hover:border-slate-300'}`}>
                     <input type="radio" name="segment" value={seg.v} checked={form.segment === seg.v} onChange={() => set('segment', seg.v)} className="accent-yellow-600" />
@@ -604,6 +627,59 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
                   </label>
                 ))}
               </div>
+              
+              {form.segment === 'specific' && (
+                <div className="mt-4 border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3 animate-slide-up">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <p className="text-xs font-bold text-slate-700">Select Target Customers</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => set('customer_ids', customers.map(c => c.customer_id))}
+                        className="text-[10px] font-bold text-cyan-600 hover:underline"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-[10px] text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => set('customer_ids', [])}
+                        className="text-[10px] font-bold text-cyan-600 hover:underline"
+                      >
+                        Deselect All
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                    {customers.map(c => {
+                      const isChecked = form.customer_ids.includes(c.customer_id);
+                      return (
+                        <label key={c.customer_id} className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-slate-100/80 rounded-lg transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              const newIds = isChecked
+                                ? form.customer_ids.filter(id => id !== c.customer_id)
+                                : [...form.customer_ids, c.customer_id];
+                              set('customer_ids', newIds);
+                            }}
+                            className="rounded text-cyan-500 focus:ring-cyan-300 animate-fade-in"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate">{c.name || 'Unknown'}</p>
+                            <p className="text-[10px] text-slate-400 truncate">{c.email || c.mobile || 'No contact details'}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                    {customers.length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-2">No customers found</p>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-semibold">{form.customer_ids.length} customer(s) selected</p>
+                </div>
+              )}
             </div>
           )}
 

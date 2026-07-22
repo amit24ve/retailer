@@ -49,7 +49,7 @@ async def resolve_enrollment_store_id(db, body: dict, brand_id: str, scoped_stor
 @router.get("")
 async def list_customers(
     page: int = Query(1, ge=1),
-    limit: int = Query(15, le=100),
+    limit: int = Query(15, le=1000),
     search: str = Query(""),
     tier: str = Query(""),
     db=Depends(get_database),

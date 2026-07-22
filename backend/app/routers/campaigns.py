@@ -99,39 +99,46 @@ async def send_campaign_whatsapp(
     has_mobile_channels = any(c in channels for c in ("sms", "whatsapp"))
     has_email_channel = "email" in channels
 
-    if has_mobile_channels and has_email_channel:
+    customer_ids = body.get("customer_ids")
+    if customer_ids:
         query = {
             "brand_id": brand_id,
-            "status": "active",
-            "$or": [
-                {"mobile": {"$exists": True, "$nin": ["", None, "unknown"]}},
-                {"email": {"$exists": True, "$nin": ["", None, "unknown"]}}
-            ]
-        }
-    elif has_email_channel:
-        query = {
-            "brand_id": brand_id,
-            "status": "active",
-            "email": {"$exists": True, "$nin": ["", None, "unknown"]}
+            "customer_id": {"$in": customer_ids}
         }
     else:
-        query = {
-            "brand_id": brand_id,
-            "status": "active",
-            "mobile": {"$exists": True, "$nin": ["", None, "unknown"]}
-        }
-    segment = body.get("segment") or campaign.get("segment", "all")
-    now = datetime.utcnow()
-    if segment in ("active", "champions", "loyal", "potential"):
-        query["last_purchase_date"] = {"$gte": now - timedelta(days=90)}
-    elif segment in ("dormant", "at-risk"):
-        query["last_purchase_date"] = {"$lt": now - timedelta(days=90)}
-    elif segment == "lost":
-        query["last_purchase_date"] = {"$lt": now - timedelta(days=180)}
-    elif segment == "new":
-        query["created_at"] = {"$gte": now - timedelta(days=30)}
-    elif segment == "gold-plus":
-        query["loyalty_tier"] = {"$in": ["Gold", "Platinum", "Diamond"]}
+        if has_mobile_channels and has_email_channel:
+            query = {
+                "brand_id": brand_id,
+                "status": "active",
+                "$or": [
+                    {"mobile": {"$exists": True, "$nin": ["", None, "unknown"]}},
+                    {"email": {"$exists": True, "$nin": ["", None, "unknown"]}}
+                ]
+            }
+        elif has_email_channel:
+            query = {
+                "brand_id": brand_id,
+                "status": "active",
+                "email": {"$exists": True, "$nin": ["", None, "unknown"]}
+            }
+        else:
+            query = {
+                "brand_id": brand_id,
+                "status": "active",
+                "mobile": {"$exists": True, "$nin": ["", None, "unknown"]}
+            }
+        segment = body.get("segment") or campaign.get("segment", "all")
+        now = datetime.utcnow()
+        if segment in ("active", "champions", "loyal", "potential"):
+            query["last_purchase_date"] = {"$gte": now - timedelta(days=90)}
+        elif segment in ("dormant", "at-risk"):
+            query["last_purchase_date"] = {"$lt": now - timedelta(days=90)}
+        elif segment == "lost":
+            query["last_purchase_date"] = {"$lt": now - timedelta(days=180)}
+        elif segment == "new":
+            query["created_at"] = {"$gte": now - timedelta(days=30)}
+        elif segment == "gold-plus":
+            query["loyalty_tier"] = {"$in": ["Gold", "Platinum", "Diamond"]}
 
     cursor = db["customers"].find(query).limit(limit)
     customers = [doc async for doc in cursor]
