@@ -158,7 +158,10 @@ async def send_campaign_whatsapp(
             "offer": str(campaign.get("discount_value") or body.get("offer") or message),
             "message": message,
         }
-        template_key = "campaign_offer" if campaign.get("discount_type") not in ("", "no-discount", None) else "campaign_info"
+        # Only campaign_offer is DLT-approved for campaigns. Even informational
+        # campaign text is placed into its offer variable so SMS sends do not hit
+        # rejected campaign_info template IDs.
+        template_key = "campaign_offer"
         personalized = render_sms_template(template_key, variables, fallback=message)
         result = await send_to_customer_channels(
             db,

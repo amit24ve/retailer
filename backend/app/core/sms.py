@@ -26,6 +26,10 @@ SMS_TEMPLATES = {
         "title": "Welcome Customer",
         "message": "Welcome to {brand}, {name}. Your loyalty account is active. Tier: {tier}. Referral code: {referral_code}. Best wishes AVOPAY.",
     },
+    "customer_welcome": {
+        "title": "Customer Welcome",
+        "message": "Welcome to {brand}, {name}. Your loyalty account is active. Tier: {tier}. Referral code: {referral_code}. Best wishes AVOPAY.",
+    },
     "purchase_receipt": {
         "title": "Purchase Receipt",
         "message": "Hi {name}, thanks for shopping at {store}. Bill amount Rs {amount}. You earned {points} points. Best wishes AVOPAY.",
@@ -118,6 +122,17 @@ def sms_units(message: str) -> int:
 
 def get_mtalkz_template_id(template_key: str | None) -> str:
     key = (template_key or "").strip().lower()
+    aliases = {
+        "customer_welcome": "welcome_customer",
+        "welcome": "welcome_customer",
+        "campaign": "campaign_offer",
+        "campaign_info": "campaign_offer",
+        "referral_invite": "campaign_offer",
+        "referral": "campaign_offer",
+        "receipt": "purchase_receipt",
+        "order_receipt": "purchase_receipt",
+    }
+    key = aliases.get(key, key)
     if key in ("otp", "otp_login", "otp_template"):
         return settings.MTALKZ_DLT_TEMPLATE_ID
 

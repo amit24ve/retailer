@@ -3,33 +3,66 @@ import asyncio
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+from email.utils import make_msgid, formatdate
 from datetime import datetime
 import logging
 import os
+import re
 from app.core.config import settings
 from app.db.database import get_database
 
 logger = logging.getLogger("email_service")
+
+def html_to_text(html: str) -> str:
+    # Basic regex-based HTML-to-text converter to provide clean plain-text fallback
+    text = re.sub(r'<script[^>]*>([\s\S]*?)</script>', '', html)
+    text = re.sub(r'<style[^>]*>([\s\S]*?)</style>', '', text)
+    text = re.sub(r'<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)</a>', r'\2 (\1)', text)
+    text = re.sub(r'<p[^>]*>', '\n', text)
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'\n+', '\n', text)
+    return text.strip()
 
 def send_email_sync(recipient: str, subject: str, html_content: str, attachments: list = None, sender_name: str = None) -> bool:
     """
     Synchronous SMTP sending function executed inside a thread pool.
     """
     try:
-        msg = MIMEMultipart("alternative")
+        if attachments:
+            msg = MIMEMultipart("mixed")
+        else:
+            msg = MIMEMultipart("alternative")
+
         msg["Subject"] = subject
         
-        # Build dynamic From header using the retailer/brand name if provided
-        from_addr = settings.EMAIL_FROM
-        if sender_name:
-            email_part = settings.EMAIL_FROM.split("<")[-1].replace(">", "").strip() if "<" in settings.EMAIL_FROM else settings.EMAIL_FROM
-            from_addr = f"{sender_name} <{email_part}>"
+        # Build dynamic From header using the retailer/brand name with authenticated user email
+        display_name = sender_name or "Retailer Platform"
+        # Always use the authenticated Gmail user as the From email address to pass SPF/DKIM
+        from_addr = f"{display_name} <{settings.EMAIL_USER}>"
             
         msg["From"] = from_addr
         msg["To"] = recipient
+        msg["Message-ID"] = make_msgid()
+        msg["Date"] = formatdate(localtime=True)
+        msg["X-Mailer"] = "Python SMTP Mailer"
 
-        # Attach HTML content
-        msg.attach(MIMEText(html_content, "html"))
+        # Assemble the alternative parts (text and html)
+        msg_alternative = MIMEMultipart("alternative")
+        if attachments:
+            msg.attach(msg_alternative)
+            alt_target = msg_alternative
+        else:
+            alt_target = msg
+
+        # Plain text fallback
+        text_content = html_to_text(html_content)
+        part_text = MIMEText(text_content, "plain", "utf-8")
+        alt_target.attach(part_text)
+
+        # HTML part
+        part_html = MIMEText(html_content, "html", "utf-8")
+        alt_target.attach(part_html)
 
         # Attach optional files
         if attachments:
@@ -42,10 +75,8 @@ def send_email_sync(recipient: str, subject: str, html_content: str, attachments
                 else:
                     logger.warning(f"Attachment file not found: {filepath}")
 
-        # Resolve raw envelope sender address
+        # Envelope sender
         sender_email = settings.EMAIL_USER
-        if "<" in settings.EMAIL_FROM:
-            sender_email = settings.EMAIL_FROM.split("<")[-1].replace(">", "").strip()
 
         # Connect and send
         port = int(settings.EMAIL_PORT)

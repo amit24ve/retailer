@@ -41,10 +41,13 @@ async def create_referral(
         "referrer_name": body.get("referrer_name", "").strip() or "Unknown",
         "referred_name": body.get("referred_name", "").strip(),
         "referred_mobile": body.get("referred_mobile", "").strip(),
+        "referred_email": body.get("referred_email", "").strip(),
+        "referral_code": body.get("referral_code", "").strip() or f"REF{uuid.uuid4().hex[:6].upper()}",
         "status": body.get("status", "pending"),
         "referrer_reward_credited": bool(body.get("referrer_reward_credited", False)),
         "referred_reward_credited": bool(body.get("referred_reward_credited", False)),
         "channel": body.get("channel", "whatsapp"),
+        "channels": body.get("channels") or [body.get("channel", "whatsapp")],
         "created_at": datetime.utcnow(),
     }
     await db["referrals"].insert_one(referral)
@@ -52,12 +55,14 @@ async def create_referral(
     if referral["referred_mobile"]:
         brand = await db["brands"].find_one({"brand_id": brand_id}, {"name": 1})
         brand_name = (brand or {}).get("name") or current_user.get("brand_name") or "AVOPAY"
+        offer_text = body.get("offer_text") or f"Join AVOPAY using referral code {referral['referral_code']}"
         message = body.get("message") or render_sms_template(
-            "referral_invite",
+            "campaign_offer",
             {
-                "name": referral["referrer_name"],
+                "name": referral["referred_name"] or "Customer",
                 "brand": brand_name,
-                "referral_code": body.get("referral_code") or referral.get("referral_id"),
+                "offer": offer_text,
+                "coupon_code": referral["referral_code"],
             },
         )
         send_result = await send_to_customer_channels(
@@ -65,6 +70,7 @@ async def create_referral(
             customer={
                 "customer_id": None,
                 "mobile": referral["referred_mobile"],
+                "email": referral["referred_email"],
                 "name": referral["referred_name"],
             },
             brand_id=brand_id,

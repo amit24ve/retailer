@@ -6,7 +6,7 @@ After approval, add the returned template IDs to `MTALKZ_TEMPLATE_IDS` in `.env`
 Example mapping:
 
 ```env
-MTALKZ_TEMPLATE_IDS=campaign_offer:ID_HERE,campaign_info:ID_HERE,welcome_customer:ID_HERE,purchase_receipt:ID_HERE,points_update:ID_HERE,tier_upgrade:ID_HERE,birthday_offer:ID_HERE,anniversary_offer:ID_HERE,referral_invite:ID_HERE,qr_share:ID_HERE,feedback_request:ID_HERE,membership_update:ID_HERE
+MTALKZ_TEMPLATE_IDS=campaign_offer:1177178454712570030,welcome_customer:1177178454794128812,customer_welcome:1177178454794128812,purchase_receipt:1177178454783392904
 ```
 
 ## Campaign Offer

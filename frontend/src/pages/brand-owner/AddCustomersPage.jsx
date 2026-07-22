@@ -249,6 +249,7 @@ function ManualTab() {
     const [created, setCreated] = useState(null);
     const [stores, setStores] = useState([]);
     const [sendingWA, setSendingWA] = useState(false);
+    const [sendingSMS, setSendingSMS] = useState(false);
     const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
     useEffect(() => {
@@ -312,6 +313,21 @@ function ManualTab() {
             toast.error("Could not send WhatsApp message");
         } finally {
             setSendingWA(false);
+        }
+    };
+
+    const sendWelcomeSMS = async () => {
+        if (!created) return;
+        setSendingSMS(true);
+        try {
+            await api.post(`/customers/${created.customer_id}/send-sms`, {
+                template_key: "welcome_customer",
+            });
+            toast.success("Welcome SMS sent!");
+        } catch (err) {
+            toast.error(err?.response?.data?.detail || "Could not send SMS");
+        } finally {
+            setSendingSMS(false);
         }
     };
 
@@ -413,6 +429,20 @@ function ManualTab() {
                             </>
                         ) : (
                             <>💬 Send Welcome WhatsApp</>
+                        )}
+                    </button>
+                    <button
+                        onClick={sendWelcomeSMS}
+                        disabled={sendingSMS}
+                        className="btn-secondary flex-1 sm:flex-none"
+                    >
+                        {sendingSMS ? (
+                            <>
+                                <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />{" "}
+                                Sending...
+                            </>
+                        ) : (
+                            <>SMS Send Welcome</>
                         )}
                     </button>
                     <button

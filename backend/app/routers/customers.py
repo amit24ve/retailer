@@ -6,7 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from app.core.security import get_current_user, get_data_scope
-from app.core.sms import send_to_customer_channels
+from app.core.sms import render_sms_template, send_to_customer_channels
 from app.db.database import get_database
 from app.routers.whatsapp import send_whatsapp_message
 
@@ -540,7 +540,20 @@ async def send_sms_to_customer(
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    message = body.get("message", "").strip()
+    template_key = body.get("template_key", "welcome_customer")
+    if template_key in ("welcome_customer", "customer_welcome", "welcome"):
+        brand = await db["brands"].find_one({"brand_id": brand_id}, {"name": 1})
+        message = render_sms_template(
+            "welcome_customer",
+            {
+                "brand": (brand or {}).get("name") or current_user.get("brand_name") or "AVOPAY",
+                "name": customer.get("name") or "Customer",
+                "tier": customer.get("loyalty_tier", "Silver"),
+                "referral_code": customer.get("referral_code", "AVOPAY"),
+            },
+        )
+    else:
+        message = body.get("message", "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="'message' is required")
 
@@ -550,7 +563,7 @@ async def send_sms_to_customer(
         brand_id=brand_id,
         channels=["sms"],
         message=message,
-        template_key=body.get("template_key", "custom"),
+        template_key=template_key,
         actor=current_user.get("full_name", "Agent"),
     )
     if result["sent"] > 0:
@@ -571,7 +584,20 @@ async def send_message_to_customer(
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    message = body.get("message", "").strip()
+    template_key = body.get("template_key", "custom")
+    if template_key in ("welcome_customer", "customer_welcome", "welcome"):
+        brand = await db["brands"].find_one({"brand_id": brand_id}, {"name": 1})
+        message = render_sms_template(
+            "welcome_customer",
+            {
+                "brand": (brand or {}).get("name") or current_user.get("brand_name") or "AVOPAY",
+                "name": customer.get("name") or "Customer",
+                "tier": customer.get("loyalty_tier", "Silver"),
+                "referral_code": customer.get("referral_code", "AVOPAY"),
+            },
+        )
+    else:
+        message = body.get("message", "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="'message' is required")
 
@@ -581,7 +607,7 @@ async def send_message_to_customer(
         brand_id=brand_id,
         channels=body.get("channels") or body.get("channel") or "whatsapp",
         message=message,
-        template_key=body.get("template_key", "custom"),
+        template_key=template_key,
         actor=current_user.get("full_name", "Agent"),
     )
     if result["sent"] > 0:
