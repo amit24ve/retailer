@@ -183,14 +183,95 @@ function DateRangeSelect({ value, onChange, options }) {
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
-function OverviewTab() {
+function OverviewTab({ customers = [], total = 0, loading = false }) {
   const [snapshotRange, setSnapshotRange] = useState('12m');
   const [newRepeatRange, setNewRepeatRange] = useState('30d');
-  const hasData = true;
+  const hasData = total > 0;
 
-  const totalCustomers = MOCK_CUSTOMERS.length;
-  const newCustomers = MOCK_CUSTOMERS.filter(c => new Date(c.created_at) > new Date(Date.now() - 30 * 86400000)).length;
-  const repeatCustomers = MOCK_CUSTOMERS.filter(c => c.total_orders > 1).length;
+  const formatDateRangeLabel = (days) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days);
+    const options = { day: '2-digit', month: 'short', year: '2-digit' };
+    return `${start.toLocaleDateString('en-IN', options)} – ${end.toLocaleDateString('en-IN', options)}`;
+  };
+
+  // Filter customers by selected range dynamically
+  const filterByRange = (list, range) => {
+    const now = Date.now();
+    let days = 365;
+    if (range === '30d') days = 30;
+    else if (range === '90d') days = 90;
+    else if (range === '6m') days = 180;
+    else if (range === '12m') days = 365;
+    
+    const cutoff = now - (days * 24 * 60 * 60 * 1000);
+    return list.filter(c => c.created_at && new Date(c.created_at).getTime() >= cutoff);
+  };
+
+  const filteredSnapshotCustomers = filterByRange(customers, snapshotRange);
+  const filteredNewRepeatCustomers = filterByRange(customers, newRepeatRange);
+
+  const totalCustomers = total;
+  const newCustomers = filteredSnapshotCustomers.length;
+  const repeatCustomers = filteredSnapshotCustomers.filter(c => (c.total_orders || 0) > 1).length;
+
+  const getDynamicChartData = (filteredList) => {
+    const months = ['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    const chartData = months.map(m => ({ month: m, new: 0, repeat: 0 }));
+    filteredList.forEach(c => {
+      if (!c.created_at) return;
+      const date = new Date(c.created_at);
+      const mLabel = date.toLocaleDateString('en-US', { month: 'short' });
+      const idx = months.indexOf(mLabel);
+      if (idx !== -1) {
+        if ((c.total_orders || 0) > 1) {
+          chartData[idx].repeat += 1;
+        } else {
+          chartData[idx].new += 1;
+        }
+      }
+    });
+    return chartData;
+  };
+  const overviewChartData = getDynamicChartData(filteredNewRepeatCustomers);
+
+  const getDynamicWeekdayData = (filteredList) => {
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const counts = weekdays.map(day => ({ day, customers: 0 }));
+    filteredList.forEach(c => {
+      if (c.created_at) {
+        let dayIdx = new Date(c.created_at).getDay();
+        dayIdx = dayIdx === 0 ? 6 : dayIdx - 1;
+        counts[dayIdx].customers += 1;
+      }
+    });
+    return counts;
+  };
+  const weekdayData = getDynamicWeekdayData(filteredSnapshotCustomers);
+
+  const getDynamicTierPie = (filteredList) => {
+    const tiers = {
+      'Silver': { value: 0, color: '#94a3b8' },
+      'Gold': { value: 0, color: '#f59e0b' },
+      'Platinum': { value: 0, color: '#c9b96e' },
+      'Diamond': { value: 0, color: '#06b6d4' },
+    };
+    filteredList.forEach(c => {
+      const t = c.loyalty_tier || 'Silver';
+      if (tiers[t]) {
+        tiers[t].value += 1;
+      } else {
+        tiers['Silver'].value += 1;
+      }
+    });
+    return Object.keys(tiers).map(name => ({
+      name,
+      value: tiers[name].value,
+      color: tiers[name].color
+    }));
+  };
+  const tierPie = getDynamicTierPie(filteredSnapshotCustomers);
 
   return (
     <div className="space-y-6">
@@ -203,17 +284,17 @@ function OverviewTab() {
             value={snapshotRange}
             onChange={setSnapshotRange}
             options={[
-              { value: '12m', label: 'Last 12 Months  01,Jun 25 – 09,Jun 26' },
-              { value: '6m', label: 'Last 6 Months' },
-              { value: '30d', label: 'Last 30 Days' },
+              { value: '12m', label: `Last 12 Months  ${formatDateRangeLabel(365)}` },
+              { value: '6m', label: `Last 6 Months  ${formatDateRangeLabel(180)}` },
+              { value: '30d', label: `Last 30 Days  ${formatDateRangeLabel(30)}` },
             ]}
           />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
             { label: 'Total Customers', value: totalCustomers.toLocaleString('en-IN'), sub: 'All time registered', icon: '👥', accent: '#f59e0b', bg: 'bg-amber-50' },
-            { label: 'New customers in selected period', value: newCustomers.toLocaleString('en-IN'), sub: `+${Math.round(newCustomers/totalCustomers*100)}% of total`, icon: '✨', accent: '#a89442', bg: 'bg-cyan-50' },
-            { label: 'Repeat customers in selected period', value: repeatCustomers.toLocaleString('en-IN'), sub: `${Math.round(repeatCustomers/totalCustomers*100)}% repeat rate`, icon: '🔁', accent: '#c9b96e', bg: 'bg-cyan-50' },
+            { label: 'New customers in selected period', value: newCustomers.toLocaleString('en-IN'), sub: totalCustomers > 0 ? `+${Math.round(newCustomers/totalCustomers*100)}% of total` : '0% of total', icon: '✨', accent: '#a89442', bg: 'bg-cyan-50' },
+            { label: 'Repeat customers in selected period', value: repeatCustomers.toLocaleString('en-IN'), sub: totalCustomers > 0 ? `${Math.round(repeatCustomers/totalCustomers*100)}% repeat rate` : '0% repeat rate', icon: '🔁', accent: '#c9b96e', bg: 'bg-cyan-50' },
           ].map(card => (
             <div key={card.label} className={`${card.bg} rounded-2xl p-5 border border-white/80 relative overflow-hidden group hover:shadow-md transition-all duration-200`}>
               <div className="flex items-start justify-between mb-4">
@@ -243,9 +324,9 @@ function OverviewTab() {
           </div>
           <DateRangeSelect value={newRepeatRange} onChange={setNewRepeatRange}
             options={[
-              { value: '30d', label: 'Last 30 Days  10,May 26 – 09,Jun 26' },
-              { value: '90d', label: 'Last 90 Days' },
-              { value: '12m', label: 'Last 12 Months' },
+              { value: '30d', label: `Last 30 Days  ${formatDateRangeLabel(30)}` },
+              { value: '90d', label: `Last 90 Days  ${formatDateRangeLabel(90)}` },
+              { value: '12m', label: `Last 12 Months  ${formatDateRangeLabel(365)}` },
             ]}
           />
         </div>
@@ -261,7 +342,7 @@ function OverviewTab() {
               </span>
             </div>
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={OVERVIEW_CHART_DATA} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
+              <AreaChart data={overviewChartData} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
                 <defs>
                   <linearGradient id="gNew" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#c9b96e" stopOpacity={0.2} />
@@ -297,7 +378,9 @@ function OverviewTab() {
               <p className="text-sm font-bold text-slate-700">Customers By Day</p>
             </div>
             <p className="text-3xl font-black text-amber-600 mb-1">
-              {Math.round((WEEKDAY_DATA[5].customers + WEEKDAY_DATA[6].customers) / WEEKDAY_DATA.reduce((s, d) => s + d.customers, 0) * 100)}%
+              {weekdayData.reduce((s, d) => s + d.customers, 0) > 0 
+                ? `${Math.round((weekdayData[5].customers + weekdayData[6].customers) / weekdayData.reduce((s, d) => s + d.customers, 0) * 100)}%`
+                : '0%'}
             </p>
             <p className="text-sm text-slate-600 mb-4">Customers visit more on <span className="font-bold text-amber-700">weekends</span></p>
 
@@ -390,12 +473,78 @@ function OverviewTab() {
 }
 
 // ─── Segmentation Tab ─────────────────────────────────────────────────────────
-function SegmentationTab() {
+function SegmentationTab({ customers = [], total = 0 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [selected, setSelected] = useState('Champions');
-  const selectedSeg = SEGMENT_DATA.find(s => s.name === selected);
-  const selectedCustomers = MOCK_CUSTOMERS.filter(c => c.segment === selected);
+
+  const getDynamicSegmentData = () => {
+    const segments = {
+      'Champions': { value: 0, color: '#c9b96e', desc: 'High frequency, high spend' },
+      'Loyal': { value: 0, color: '#c9b96e', desc: 'Regular visitors' },
+      'Potential': { value: 0, color: '#f59e0b', desc: 'Growing engagement' },
+      'At Risk': { value: 0, color: '#f97316', desc: 'Declining activity' },
+      'Lost': { value: 0, color: '#ef4444', desc: 'No recent purchase' },
+    };
+    
+    customers.forEach(c => {
+      let seg = c.segment || 'Potential';
+      if (seg === 'champions') seg = 'Champions';
+      else if (seg === 'loyal') seg = 'Loyal';
+      else if (seg === 'potential') seg = 'Potential';
+      else if (seg === 'at-risk' || seg === 'At Risk') seg = 'At Risk';
+      else if (seg === 'lost') seg = 'Lost';
+      
+      if (segments[seg]) {
+        segments[seg].value += 1;
+      } else {
+        segments['Potential'].value += 1;
+      }
+    });
+    
+    return Object.keys(segments).map(name => ({
+      name,
+      value: segments[name].value,
+      color: segments[name].color,
+      desc: segments[name].desc
+    }));
+  };
+
+  const segmentData = getDynamicSegmentData();
+  const selectedSeg = segmentData.find(s => s.name === selected);
+  
+  const selectedCustomers = customers.filter(c => {
+    let seg = c.segment || 'Potential';
+    if (seg === 'champions') seg = 'Champions';
+    else if (seg === 'loyal') seg = 'Loyal';
+    else if (seg === 'potential') seg = 'Potential';
+    else if (seg === 'at-risk' || seg === 'At Risk') seg = 'At Risk';
+    else if (seg === 'lost') seg = 'Lost';
+    return seg === selected;
+  });
+
+  const getDynamicTierPie = () => {
+    const tiers = {
+      'Silver': { value: 0, color: '#94a3b8' },
+      'Gold': { value: 0, color: '#f59e0b' },
+      'Platinum': { value: 0, color: '#c9b96e' },
+      'Diamond': { value: 0, color: '#06b6d4' },
+    };
+    customers.forEach(c => {
+      const t = c.loyalty_tier || 'Silver';
+      if (tiers[t]) {
+        tiers[t].value += 1;
+      } else {
+        tiers['Silver'].value += 1;
+      }
+    });
+    return Object.keys(tiers).map(name => ({
+      name,
+      value: tiers[name].value,
+      color: tiers[name].color
+    }));
+  };
+  const tierPie = getDynamicTierPie();
 
   return (
     <div className="space-y-5">
@@ -406,9 +555,9 @@ function SegmentationTab() {
           <h3 className="text-sm font-bold text-slate-900 mb-4">RFM Segment Distribution</h3>
           <ResponsiveContainer width="100%" height={180}>
             <PieChart>
-              <Pie data={SEGMENT_DATA} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="value"
+              <Pie data={segmentData} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="value"
                 onClick={d => setSelected(d.name)}>
-                {SEGMENT_DATA.map((s, i) => (
+                {segmentData.map((s, i) => (
                   <Cell key={i} fill={s.color} opacity={selected === s.name ? 1 : 0.5} stroke={selected === s.name ? s.color : 'none'} strokeWidth={2} />
                 ))}
               </Pie>
@@ -416,7 +565,7 @@ function SegmentationTab() {
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-1.5 mt-2">
-            {SEGMENT_DATA.map(s => (
+            {segmentData.map(s => (
               <button key={s.name} onClick={() => setSelected(s.name)}
                 className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg transition-colors ${selected === s.name ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
                 <div className="flex items-center gap-2">
@@ -506,7 +655,7 @@ function SegmentationTab() {
       <div className="bg-white border border-slate-200 rounded-2xl p-5">
         <h3 className="text-sm font-bold text-slate-900 mb-4">Loyalty Tier Distribution</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {TIER_PIE.map(t => (
+          {tierPie.map(t => (
             <div key={t.name} className="rounded-2xl p-4 border" style={{ background: t.color + '10', borderColor: t.color + '30' }}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-3 h-3 rounded-full" style={{ background: t.color }} />
@@ -514,7 +663,7 @@ function SegmentationTab() {
               </div>
               <p className="text-2xl font-black text-slate-900">{t.value.toLocaleString('en-IN')}</p>
               <div className="mt-2 h-1.5 bg-white/60 rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(t.value / TIER_PIE.reduce((s, x) => s + x.value, 0)) * 100}%`, background: t.color }} />
+                <div className="h-full rounded-full" style={{ width: `${tierPie.reduce((s, x) => s + x.value, 0) > 0 ? (t.value / tierPie.reduce((s, x) => s + x.value, 0)) * 100 : 0}%`, background: t.color }} />
               </div>
             </div>
           ))}
@@ -703,10 +852,31 @@ function CustomerListTab({ onAddCustomer }) {
 }
 
 // ─── Activity Tab ─────────────────────────────────────────────────────────────
-function ActivityTab() {
+function ActivityTab({ customers = [] }) {
   const [filter, setFilter] = useState('all');
-  const filters = ['all', 'purchase', 'redeem', 'upgrade', 'signup', 'coupon'];
-  const filtered = filter === 'all' ? ACTIVITY_LOG : ACTIVITY_LOG.filter(a => a.type === filter);
+  const filters = ['all', 'signup'];
+
+  const getDynamicActivityLog = () => {
+    const logs = [];
+    customers.forEach(c => {
+      if (c.created_at) {
+        logs.push({
+          id: `signup-${c.customer_id}`,
+          name: c.name || 'Customer',
+          action: 'Joined the loyalty program',
+          amount: '',
+          store: c.store_name || '',
+          time: new Date(c.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+          type: 'signup',
+          tier: c.loyalty_tier || 'Silver'
+        });
+      }
+    });
+    return logs;
+  };
+
+  const activityLog = getDynamicActivityLog();
+  const filtered = filter === 'all' ? activityLog : activityLog.filter(a => a.type === filter);
 
   return (
     <div className="space-y-4">
@@ -766,10 +936,10 @@ function ActivityTab() {
       {/* Activity summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Purchases Today', value: '142', icon: '🛍️', color: 'text-amber-700', bg: 'bg-cyan-50' },
-          { label: 'Points Redeemed', value: '28,421', icon: '⭐', color: 'text-amber-600', bg: 'bg-cyan-50' },
-          { label: 'Tier Upgrades', value: '18', icon: '⬆️', color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'New Signups', value: '47', icon: '👋', color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Purchases Today', value: '0', icon: '🛍️', color: 'text-amber-700', bg: 'bg-cyan-50' },
+          { label: 'Points Redeemed', value: '0', icon: '⭐', color: 'text-amber-600', bg: 'bg-cyan-50' },
+          { label: 'Tier Upgrades', value: String(customers.filter(c => c.loyalty_tier && c.loyalty_tier !== 'Silver').length), icon: '⬆️', color: 'text-amber-600', bg: 'bg-amber-50' },
+          { label: 'New Signups', value: String(customers.length), icon: '👋', color: 'text-blue-600', bg: 'bg-blue-50' },
         ].map(s => (
           <div key={s.label} className={`${s.bg} rounded-2xl p-4 border border-white/80`}>
             <span className="text-2xl">{s.icon}</span>
@@ -786,6 +956,19 @@ function ActivityTab() {
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [showModal, setShowModal] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/customers', { params: { limit: 1000 } })
+      .then(r => {
+        setCustomers(r.data.customers || []);
+        setTotal(r.data.total || 0);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   const TABS = [
     { id: 'overview',     label: 'Overview' },
@@ -823,10 +1006,10 @@ export default function CustomersPage() {
       </div>
 
       {/* ── Tab content ── */}
-      {activeTab === 'overview'     && <OverviewTab />}
-      {activeTab === 'segmentation' && <SegmentationTab />}
+      {activeTab === 'overview'     && <OverviewTab customers={customers} total={total} loading={loading} />}
+      {activeTab === 'segmentation' && <SegmentationTab customers={customers} total={total} />}
       {activeTab === 'list'         && <CustomerListTab onAddCustomer={() => setShowModal(true)} />}
-      {activeTab === 'activity'     && <ActivityTab />}
+      {activeTab === 'activity'     && <ActivityTab customers={customers} />}
 
       {/* ── Add customer modal ── */}
       {showModal && (

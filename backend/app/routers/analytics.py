@@ -31,8 +31,8 @@ async def get_dashboard(
         {"$group": {"_id": None, "total": {"$sum": "$net_amount"}, "count": {"$sum": 1}}},
     ]
     rev = await db["orders"].aggregate(rev_pipeline).to_list(1)
-    total_revenue = rev[0]["total"] if rev else 842884
-    total_orders = rev[0]["count"] if rev else 1248
+    total_revenue = rev[0]["total"] if rev else 0
+    total_orders = rev[0]["count"] if rev else 0
 
     # New customers
     new_customers = await db["customers"].count_documents(
@@ -46,7 +46,7 @@ async def get_dashboard(
         {"$group": {"_id": None, "count": {"$sum": 1}}},
     ]
     rewards = await db["loyalty_ledger"].aggregate(rewards_pipeline).to_list(1)
-    rewards_redeemed = rewards[0]["count"] if rewards else 184
+    rewards_redeemed = rewards[0]["count"] if rewards else 0
 
     # Weekly chart data (12 weeks)
     weekly_sales = []
@@ -131,14 +131,20 @@ async def get_dashboard(
         {"brand_id": BRAND_ID, "status": {"$in": ["purchased", "rewarded"]}}
     )
 
-    # Credits (mock — replace with real billing data if available)
-    credits = {"sms": 100, "email": 100, "wa_utility": 100, "wa_marketing": 100}
+    brand_doc = await db["brands"].find_one({"brand_id": BRAND_ID}, {"credits": 1})
+    brand_credits = (brand_doc or {}).get("credits") or {}
+    credits = {
+        "sms": brand_credits.get("sms", 0) or 0,
+        "email": brand_credits.get("email", 0) or 0,
+        "wa_utility": brand_credits.get("wa_utility", 0) or 0,
+        "wa_marketing": brand_credits.get("wa_marketing", 0) or 0,
+    }
 
     return {
         "metrics": {
             "total_revenue": total_revenue,
             "total_orders": total_orders,
-            "new_customers": new_customers or 342,
+            "new_customers": new_customers,
             "rewards_redeemed": rewards_redeemed,
         },
         "weekly_chart": {
@@ -152,14 +158,14 @@ async def get_dashboard(
             "mobile_capture_count": new_30d,
             "fifth_visit_pct": 42,
             "visit_rates": [100, 72, 58, 48, 42],
-            "aov": round(total_revenue / total_orders) if total_orders > 0 else 2401,
-            "aov_trend": [2100, 2300, 2150, 2450, 2200, 2800, 2400, 2600, 2350, 2700, 2500, 2401],
+            "aov": round(total_revenue / total_orders) if total_orders > 0 else 0,
+            "aov_trend": [round(total_revenue / total_orders) if total_orders > 0 else 0] * 12,
         },
         "credits": credits,
         "cuben_retailer_impact": {
             "total_sales": total_revenue,
-            "additional_purchases": total_converted or 284,
-            "new_customers": new_customers or 342,
+            "additional_purchases": total_converted,
+            "new_customers": new_customers,
         },
         "celebrations": [],
         "profile_completion": {
