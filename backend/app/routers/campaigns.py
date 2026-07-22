@@ -96,7 +96,30 @@ async def send_campaign_whatsapp(
     brand = await db["brands"].find_one({"brand_id": brand_id}, {"name": 1})
     brand_name = (brand or {}).get("name") or current_user.get("brand_name") or "AVOPAY"
 
-    query = {"brand_id": brand_id, "status": "active", "mobile": {"$exists": True, "$nin": ["", None, "unknown"]}}
+    has_mobile_channels = any(c in channels for c in ("sms", "whatsapp"))
+    has_email_channel = "email" in channels
+
+    if has_mobile_channels and has_email_channel:
+        query = {
+            "brand_id": brand_id,
+            "status": "active",
+            "$or": [
+                {"mobile": {"$exists": True, "$nin": ["", None, "unknown"]}},
+                {"email": {"$exists": True, "$nin": ["", None, "unknown"]}}
+            ]
+        }
+    elif has_email_channel:
+        query = {
+            "brand_id": brand_id,
+            "status": "active",
+            "email": {"$exists": True, "$nin": ["", None, "unknown"]}
+        }
+    else:
+        query = {
+            "brand_id": brand_id,
+            "status": "active",
+            "mobile": {"$exists": True, "$nin": ["", None, "unknown"]}
+        }
     segment = body.get("segment") or campaign.get("segment", "all")
     now = datetime.utcnow()
     if segment in ("active", "champions", "loyal", "potential"):

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../services/api";
 import toast from "react-hot-toast";
 import {
@@ -1884,7 +1884,15 @@ function SectionHeader({ icon, title, subtitle }) {
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function AddCustomersPage() {
-    const [activeTab, setActiveTab] = useState("manual");
+    const [searchParams] = useSearchParams();
+    const tabParam = searchParams.get("tab");
+    const [activeTab, setActiveTab] = useState(tabParam || "manual");
+
+    useEffect(() => {
+        if (tabParam) {
+            setActiveTab(tabParam);
+        }
+    }, [tabParam]);
 
     return (
         <div className="space-y-6 pb-12 animate-slide-up">

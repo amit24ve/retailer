@@ -82,7 +82,7 @@ def normalize_channels(value) -> list[str]:
         channel = str(item or "").strip().lower()
         if channel == "both":
             channels.extend(["whatsapp", "sms"])
-        elif channel in ("whatsapp", "sms"):
+        elif channel in ("whatsapp", "sms", "email"):
             channels.append(channel)
     return list(dict.fromkeys(channels)) or ["whatsapp"]
 
@@ -236,7 +236,12 @@ async def get_sms_balance() -> dict:
 
 
 async def ensure_brand_credits(db, brand_id: str, channel: str, units: int = 1) -> tuple[bool, str]:
-    field = "credits.sms" if channel == "sms" else "credits.wa_marketing"
+    if channel == "sms":
+        field = "credits.sms"
+    elif channel == "email":
+        field = "credits.email"
+    else:
+        field = "credits.wa_marketing"
     brand = await db["brands"].find_one({"brand_id": brand_id}, {"credits": 1})
     available = ((brand or {}).get("credits") or {}).get(field.split(".")[1], 0) or 0
     if available < units:
@@ -247,7 +252,12 @@ async def ensure_brand_credits(db, brand_id: str, channel: str, units: int = 1) 
 async def deduct_brand_credits(db, brand_id: str, channel: str, units: int = 1):
     if not brand_id or units <= 0:
         return
-    field = "credits.sms" if channel == "sms" else "credits.wa_marketing"
+    if channel == "sms":
+        field = "credits.sms"
+    elif channel == "email":
+        field = "credits.email"
+    else:
+        field = "credits.wa_marketing"
     await db["brands"].update_one(
         {"brand_id": brand_id},
         {"$inc": {field: -units}, "$set": {"updated_at": datetime.utcnow()}},
@@ -321,41 +331,98 @@ async def send_to_customer_channels(
     actor: str = "System",
 ) -> dict:
     channels = normalize_channels(channels)
-    phone = clean_phone(customer.get("mobile", ""))
-    if not phone:
-        return {"sent": 0, "failed": len(channels), "results": [{"channel": c, "success": False, "error": "No mobile"} for c in channels]}
 
     results = []
     sent = 0
     failed = 0
     for channel in channels:
         if channel == "sms":
-            units = sms_units(message)
-            ok, reason = await ensure_brand_credits(db, brand_id, "sms", units)
-            if not ok:
-                result = {"success": False, "message_id": None, "error": reason}
+            phone = clean_phone(customer.get("mobile", ""))
+            if not phone:
+                result = {"success": False, "message_id": None, "error": "No mobile number"}
+                to_addr = "unknown"
+                units = 1
             else:
-                result = await send_sms_message(phone, message, template_id=get_mtalkz_template_id(template_key))
-                if result.get("success"):
-                    await deduct_brand_credits(db, brand_id, "sms", units)
-        else:
-            units = 1
-            ok, reason = await ensure_brand_credits(db, brand_id, "whatsapp", units)
-            if not ok:
-                result = {"success": False, "message_id": None, "error": reason}
+                to_addr = phone
+                units = sms_units(message)
+                ok, reason = await ensure_brand_credits(db, brand_id, "sms", units)
+                if not ok:
+                    result = {"success": False, "message_id": None, "error": reason}
+                else:
+                    result = await send_sms_message(phone, message, template_id=get_mtalkz_template_id(template_key))
+                    if result.get("success"):
+                        await deduct_brand_credits(db, brand_id, "sms", units)
+        elif channel == "email":
+            email = customer.get("email")
+            if not email or email == "unknown":
+                result = {"success": False, "message_id": None, "error": "No email address"}
+                to_addr = "unknown"
+                units = 1
             else:
-                from app.routers.whatsapp import send_whatsapp_message
+                to_addr = email
+                units = 1
+                ok, reason = await ensure_brand_credits(db, brand_id, "email", units)
+                if not ok:
+                    result = {"success": False, "message_id": None, "error": reason}
+                else:
+                    from app.core.email import send_email
 
-                result = await send_whatsapp_message(to=phone, message=message)
-                if result.get("success"):
-                    await deduct_brand_credits(db, brand_id, "whatsapp", units)
+                    campaign_subject = "Special Campaign Offer"
+                    if campaign_id:
+                        campaign_doc = await db["campaigns"].find_one({"campaign_id": campaign_id}, {"name": 1})
+                        if campaign_doc and campaign_doc.get("name"):
+                            campaign_subject = campaign_doc.get("name")
+
+                    brand = await db["brands"].find_one({"brand_id": brand_id}, {"name": 1})
+                    brand_name = (brand or {}).get("name") or "Retailer"
+
+                    html_content = f"""
+                    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+                        <h2 style="color: #4f46e5; margin-bottom: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">{brand_name}</h2>
+                        <p style="font-size: 16px; line-height: 1.6; color: #334155; margin-bottom: 24px;">{message}</p>
+                        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+                        <p style="font-size: 12px; color: #94a3b8; text-align: center;">You received this email because you are a valued customer of {brand_name}.</p>
+                    </div>
+                    """
+
+                    email_success = await send_email(
+                        event_name="campaign_email",
+                        recipient=email,
+                        subject=campaign_subject,
+                        html_content=html_content,
+                        sender_name=brand_name
+                    )
+
+                    if email_success:
+                        result = {"success": True, "message_id": f"mail-{uuid.uuid4()}"}
+                        await deduct_brand_credits(db, brand_id, "email", units)
+                    else:
+                        result = {"success": False, "message_id": None, "error": "SMTP send failed"}
+        else:
+            phone = clean_phone(customer.get("mobile", ""))
+            if not phone:
+                result = {"success": False, "message_id": None, "error": "No mobile number"}
+                to_addr = "unknown"
+                units = 1
+            else:
+                to_addr = phone
+                units = 1
+                ok, reason = await ensure_brand_credits(db, brand_id, "whatsapp", units)
+                if not ok:
+                    result = {"success": False, "message_id": None, "error": reason}
+                else:
+                    from app.routers.whatsapp import send_whatsapp_message
+
+                    result = await send_whatsapp_message(to=phone, message=message)
+                    if result.get("success"):
+                        await deduct_brand_credits(db, brand_id, "whatsapp", units)
 
         await log_message(
             db,
             brand_id=brand_id,
             customer_id=customer.get("customer_id"),
             channel=channel,
-            to=phone,
+            to=to_addr,
             message=message,
             result=result,
             template_key=template_key,

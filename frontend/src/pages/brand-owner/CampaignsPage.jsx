@@ -7,6 +7,7 @@ import {
   EllipsisHorizontalIcon, PencilIcon, TrashIcon, PaperAirplaneIcon,
   ChartBarIcon, ArrowRightIcon, SparklesIcon, QuestionMarkCircleIcon,
   ArrowTrendingUpIcon, UserGroupIcon, CurrencyRupeeIcon, EyeIcon,
+  EnvelopeIcon,
 } from '@heroicons/react/24/outline';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -297,11 +298,9 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
       return { ...f, channels: channels.length ? channels : [channel] };
     });
   };
-  const channelLabel = form.channels.length === 2
-    ? 'SMS + WhatsApp'
-    : form.channels[0] === 'sms'
-      ? 'SMS'
-      : 'WhatsApp';
+  const channelLabel = form.channels
+    .map(c => c === 'sms' ? 'SMS' : c === 'whatsapp' ? 'WhatsApp' : 'Email')
+    .join(' + ');
   const imgInputRef = React.useRef(null);
 
   // Handle local image pick → show preview
@@ -332,7 +331,7 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
         segment: form.segment || 'all',
         schedule: form.schedule || 'now',
         scheduled_at: form.scheduled_at || '',
-        channel: form.channels.length === 2 ? 'both' : form.channels[0],
+        channel: form.channels.length > 1 ? 'both' : form.channels[0],
         channels: form.channels,
       };
 
@@ -374,7 +373,7 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
         segment: form.segment || 'all',
         schedule: form.schedule || 'now',
         scheduled_at: form.scheduled_at || '',
-        channel: form.channels.length === 2 ? 'both' : form.channels[0],
+        channel: form.channels.length > 1 ? 'both' : form.channels[0],
         channels: form.channels,
         status: 'draft',
       };
@@ -552,7 +551,7 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
               <div className="bg-cyan-50 border border-cyan-200 rounded-2xl p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-7 h-7 bg-cyan-500 rounded-full flex items-center justify-center text-white">
-                    <WaIcon size={14} />
+                    {form.channels.includes('whatsapp') ? <WaIcon size={14} /> : form.channels.includes('sms') ? <span className="text-[8px] font-black">SMS</span> : <EnvelopeIcon className="w-3.5 h-3.5" />}
                   </div>
                   <span className="text-sm font-bold text-amber-800">{channelLabel} Message Preview</span>
                 </div>
@@ -612,10 +611,11 @@ function CampaignBuilder({ template, onClose, onSuccess }) {
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wide">Delivery Channels</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                   {[
                     { v: 'whatsapp', label: 'WhatsApp', icon: <WaIcon size={16} />, desc: 'Send via WhatsApp Business API' },
                     { v: 'sms', label: 'SMS', icon: 'SMS', desc: 'Send via mTalkz text message' },
+                    { v: 'email', label: 'Email', icon: <EnvelopeIcon className="w-4 h-4 text-slate-700" />, desc: 'Send via Email Delivery' },
                   ].map(opt => {
                     const active = form.channels.includes(opt.v);
                     return (
@@ -882,11 +882,33 @@ function CampaignPerformance({ onCreateCampaign, onEditCampaign, onViewCampaign,
     const converted = c.converted || 0;
     const revenue = c.revenue || (converted * 150) || 0;
 
+    const channels = c.channels || (c.channel === 'sms' ? ['sms'] : ['whatsapp']);
+    const channelText = channels
+      .map(ch => ch === 'sms' ? 'SMS' : ch === 'whatsapp' ? 'WhatsApp' : 'Email')
+      .join(' + ');
+
+    let iconBg = 'bg-cyan-500';
+    let iconContent = <WaIcon size={16} />;
+    if (channels.length === 1) {
+      if (channels[0] === 'sms') {
+        iconBg = 'bg-amber-500';
+        iconContent = <span className="text-[10px] font-black">SMS</span>;
+      } else if (channels[0] === 'email') {
+        iconBg = 'bg-indigo-500';
+        iconContent = <EnvelopeIcon className="w-4 h-4 text-white" />;
+      }
+    } else if (channels.length > 1) {
+      iconBg = 'bg-slate-700';
+      iconContent = <span className="text-[9px] font-bold">MULTI</span>;
+    }
+
     return {
       id: c.campaign_id || c._id,
       name: c.name || 'Untitled Campaign',
       status: status,
-      channel: 'whatsapp',
+      channelText,
+      iconBg,
+      iconContent,
       sent: sent,
       delivered: delivered,
       read: read,
@@ -1015,12 +1037,12 @@ function CampaignPerformance({ onCreateCampaign, onEditCampaign, onViewCampaign,
                     <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0 text-white">
-                            <WaIcon size={16} />
+                          <div className={`w-8 h-8 ${c.iconBg || 'bg-cyan-500'} rounded-lg flex items-center justify-center flex-shrink-0 text-white`}>
+                            {c.iconContent}
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{c.name}</p>
-                            <p className="text-xs text-slate-400">WhatsApp</p>
+                            <p className="text-xs text-slate-400">{c.channelText}</p>
                           </div>
                         </div>
                       </td>
