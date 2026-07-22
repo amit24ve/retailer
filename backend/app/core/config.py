@@ -17,6 +17,22 @@ class Settings(BaseSettings):
     # so real payment/credits are not consumed while verifying the integration.
     WHATSAPP_TEST_MODE: bool = True
 
+    # SMS API (mTalkz)
+    MTALKZ_PE_ID: str = ""
+    MTALKZ_API_URL: str = "https://msgn.mtalkz.com/api"
+    MTALKZ_SENDER_ID: str = "AVOPAY"
+    MTALKZ_API_KEY: str = ""
+    MTALKZ_DLT_TEMPLATE_ID: str = ""
+    MTALKZ_TEMPLATE_IDS: str = ""
+    SMS_TEST_MODE: bool = False
+
+    # Email SMTP configuration
+    EMAIL_HOST: str = "smtp.gmail.com"
+    EMAIL_PORT: int = 465
+    EMAIL_USER: str = "rajamit22ve@gmail.com"
+    EMAIL_PASS: str = "aqbz iiyb frnk mluz"
+    EMAIL_FROM: str = "Retailer Platform <rajamit22ve@gmail.com>"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

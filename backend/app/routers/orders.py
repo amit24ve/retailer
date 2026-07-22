@@ -5,8 +5,8 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.core.security import get_current_user, get_data_scope
+from app.core.sms import render_sms_template, send_to_customer_channels
 from app.db.database import get_database
-from app.routers.whatsapp import send_whatsapp_message
 
 router = APIRouter()
 TIER_THRESHOLDS = {"Silver": 0, "Gold": 10000, "Platinum": 50000, "Diamond": 100000}
@@ -30,40 +30,37 @@ def compute_tier(lifetime_value: float) -> str:
     return "Silver"
 
 
-async def dispatch_whatsapp_receipt(db, customer_id: str, mobile: str, template: str, vars: dict):
+async def dispatch_order_notification(db, customer: dict, brand_id: str, channels, template: str, vars: dict):
     """
-    Send the real purchase-receipt WhatsApp message via Bonvoice, then log the
-    outcome (sent or skipped/failed) to the customer timeline.
+    Send the purchase receipt over selected channels, then log outcomes.
     """
-    summary_text = (
-        f"Hi {vars.get('name') or 'there'}! Thanks for shopping at {vars.get('store')}. "
-        f"You spent ₹{vars.get('amount')} and earned {vars.get('points')} points. 🎉"
-    )
-    result = {"success": False, "message_id": None, "error": "No mobile number on file"}
-    if mobile and mobile != "unknown":
-        phone = mobile if mobile.startswith("91") else f"91{mobile}"
-        result = await send_whatsapp_message(to=phone, message=summary_text)
-
-    await db["customer_timeline"].insert_one(
+    summary_text = render_sms_template(
+        template,
         {
-            "event_id": str(uuid.uuid4()),
-            "customer_id": customer_id,
-            "event_type": "whatsapp_sent",
-            "summary": f"WhatsApp '{template}' {'sent' if result['success'] else 'not sent'}",
-            "payload": {
-                "template": template,
-                "variables": vars,
-                "status": "delivered" if result["success"] else "failed",
-                "message_id": result.get("message_id"),
-                "error": result.get("error"),
-            },
-            "created_at": datetime.utcnow(),
-        }
+            "name": vars.get("name") or "Customer",
+            "store": vars.get("store") or "our store",
+            "amount": vars.get("amount") or 0,
+            "points": vars.get("points") or 0,
+        },
+        fallback=(
+            f"Hi {vars.get('name') or 'Customer'}, thanks for shopping at {vars.get('store')}. "
+            f"Bill amount Rs {vars.get('amount')}. You earned {vars.get('points')} points. Best wishes AVOPAY."
+        ),
     )
-    return result.get("message_id")
+    return await send_to_customer_channels(
+        db,
+        customer=customer,
+        brand_id=brand_id,
+        channels=channels,
+        message=summary_text,
+        template_key=template,
+        actor="POS",
+    )
 
 
 @router.post("/orders", status_code=201)
+@router.post("/pos/orders", status_code=201)
+@router.post("/orders/pos", status_code=201)
 async def create_pos_order(
     body: dict,
     background_tasks: BackgroundTasks,
@@ -81,12 +78,18 @@ async def create_pos_order(
     redeem_pts = int(body.get("redeem_points_requested", 0))
     cashback_applied = float(body.get("apply_cashback_wallet", 0))
     invoice_number = body.get("invoice_number", f"INV-{uuid.uuid4().hex[:8].upper()}")
-    store_code = body.get("store_code", "DEL-FLAGSHIP-01")
+    requested_store_id = body.get("store_id") or store_id
+    store_code = body.get("store_code")
 
-    # Find store
-    store = await db["stores"].find_one({"store_code": store_code})
-    store_id = store["store_id"] if store else "s1"
-    store_name = store["name"] if store else "Unknown Store"
+    # Find store without breaking store-scoped users. Older frontend screens send
+    # store_code, store-manager POS sends store_id.
+    store = None
+    if store_code:
+        store = await db["stores"].find_one({"store_code": store_code, "brand_id": brand_id})
+    if not store and requested_store_id:
+        store = await db["stores"].find_one({"store_id": requested_store_id, "brand_id": brand_id})
+    store_id = (store or {}).get("store_id") or requested_store_id
+    store_name = (store or {}).get("name") or body.get("store_name") or current_user.get("store_name") or "Unknown Store"
 
     # Find or create customer
     customer = None
@@ -162,6 +165,7 @@ async def create_pos_order(
             "store_name": store_name,
             "customer_id": customer_id,
             "customer_name": customer.get("name", customer_name),
+            "customer_mobile": customer_mobile,
             "invoice_number": invoice_number,
             "gross_amount": gross,
             "tax_amount": tax,
@@ -225,12 +229,15 @@ async def create_pos_order(
             }
         )
 
-    # Background: WhatsApp notification (real send via Bonvoice, capped by test mode)
+    notification_channels = body.get("notification_channels") or body.get("channels") or ["whatsapp"]
+
+    # Background: purchase notification over selected channels
     background_tasks.add_task(
-        dispatch_whatsapp_receipt,
+        dispatch_order_notification,
         db,
-        customer_id,
-        customer.get("mobile", ""),
+        customer,
+        brand_id,
+        notification_channels,
         "purchase_receipt",
         {
             "name": customer.get("name"),
@@ -239,6 +246,39 @@ async def create_pos_order(
             "points": points_earned,
         },
     )
+
+    # Resolve customer email and trigger order emails
+    customer_email = body.get("customer_email") or customer.get("email")
+    if not customer_email or customer_email == "unknown":
+        manager = await db["users"].find_one({"store_id": store_id, "role": "Store Manager"})
+        if manager:
+            customer_email = manager["email"]
+        else:
+            owner = await db["users"].find_one({"brand_id": brand_id, "role": "Brand Owner"})
+            if owner:
+                customer_email = owner["email"]
+
+    if customer_email:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import (
+                get_new_purchase_order_email,
+                get_payment_successful_email,
+                get_invoice_generated_email
+            )
+            # New purchase order email
+            po_html = get_new_purchase_order_email(invoice_number, net, customer.get("name", customer_name), store_name)
+            await send_email("new_purchase_order_created", customer_email, f"New Purchase Order - {invoice_number}", po_html)
+
+            # Payment successful email
+            pay_html = get_payment_successful_email(invoice_number, net)
+            await send_email("payment_successful", customer_email, f"Payment Received - {invoice_number}", pay_html)
+
+            # Invoice generated email
+            inv_html = get_invoice_generated_email(invoice_number, net)
+            await send_email("invoice_generated", customer_email, f"Invoice Generated - {invoice_number}", inv_html)
+        except Exception:
+            pass
 
     # Refresh customer
     updated_customer = await db["customers"].find_one({"customer_id": customer_id})
@@ -286,3 +326,237 @@ async def list_orders(db=Depends(get_database), current_user=Depends(get_current
         doc["_id"] = str(doc["_id"])
         orders.append(doc)
     return {"orders": orders}
+
+
+# ─── ORDER WORKFLOW & PAYMENT ENDPOINTS ───────────────────────────────────────
+async def _get_order_customer_email(order: dict, db) -> str:
+    """Helper to resolve customer email with fallback."""
+    customer = await db["customers"].find_one({"customer_id": order.get("customer_id")})
+    if customer and customer.get("email") and customer.get("email") != "unknown":
+        return customer["email"]
+    
+    # Fallback to store manager or brand owner
+    store_id = order.get("store_id")
+    brand_id = order.get("brand_id")
+    manager = await db["users"].find_one({"store_id": store_id, "role": "Store Manager"})
+    if manager:
+        return manager["email"]
+    owner = await db["users"].find_one({"brand_id": brand_id, "role": "Brand Owner"})
+    if owner:
+        return owner["email"]
+    return None
+
+
+@router.post("/orders/{order_id}/accept")
+async def accept_order(
+    order_id: str,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    await db["orders"].update_one({"order_id": order_id}, {"$set": {"status": "accepted"}})
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_order_accepted_email
+            html = get_order_accepted_email(order["invoice_number"])
+            await send_email("order_accepted", recipient, f"Order Accepted - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "status": "accepted"}
+
+
+@router.post("/orders/{order_id}/reject")
+async def reject_order(
+    order_id: str,
+    payload: dict,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    reason = payload.get("reason", "Out of stock or store closing.")
+    await db["orders"].update_one({"order_id": order_id}, {"$set": {"status": "rejected", "rejection_reason": reason}})
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_order_rejected_email
+            html = get_order_rejected_email(order["invoice_number"], reason)
+            await send_email("order_rejected", recipient, f"Order Rejected - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "status": "rejected"}
+
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel_order(
+    order_id: str,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    await db["orders"].update_one({"order_id": order_id}, {"$set": {"status": "cancelled"}})
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_order_cancelled_email
+            html = get_order_cancelled_email(order["invoice_number"])
+            await send_email("order_cancelled", recipient, f"Order Cancelled - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "status": "cancelled"}
+
+
+@router.post("/orders/{order_id}/dispatch")
+async def dispatch_order(
+    order_id: str,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    await db["orders"].update_one({"order_id": order_id}, {"$set": {"status": "dispatched"}})
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_order_dispatched_email
+            html = get_order_dispatched_email(order["invoice_number"])
+            await send_email("order_dispatched", recipient, f"Order Dispatched 🚚 - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "status": "dispatched"}
+
+
+@router.post("/orders/{order_id}/deliver")
+async def deliver_order(
+    order_id: str,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    await db["orders"].update_one({"order_id": order_id}, {"$set": {"status": "delivered"}})
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_order_delivered_email
+            html = get_order_delivered_email(order["invoice_number"])
+            await send_email("order_delivered", recipient, f"Order Delivered 🎉 - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "status": "delivered"}
+
+
+@router.post("/orders/{order_id}/return")
+async def return_order(
+    order_id: str,
+    payload: dict,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    amount = float(payload.get("amount", order.get("net_amount", 0)))
+    await db["orders"].update_one({"order_id": order_id}, {"$set": {"status": "returned", "return_amount": amount}})
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_order_returned_email
+            html = get_order_returned_email(order["invoice_number"], amount)
+            await send_email("order_returned", recipient, f"Order Returned - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "status": "returned", "return_amount": amount}
+
+
+@router.post("/orders/{order_id}/refund")
+async def refund_order(
+    order_id: str,
+    payload: dict,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    amount = float(payload.get("amount", order.get("net_amount", 0)))
+    await db["orders"].update_one(
+        {"order_id": order_id},
+        {"$set": {"payment_status": "refunded", "refund_amount": amount}}
+    )
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_refund_processed_email
+            html = get_refund_processed_email(order["invoice_number"], amount)
+            await send_email("refund_processed", recipient, f"Refund Processed - {order['invoice_number']}", html)
+        except Exception:
+            pass
+
+    return {"success": True, "payment_status": "refunded", "refund_amount": amount}
+
+
+@router.post("/orders/{order_id}/payment-failed")
+async def payment_failed(
+    order_id: str,
+    payload: dict,
+    db=Depends(get_database),
+    current_user=Depends(get_current_user),
+):
+    order = await db["orders"].find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    amount = float(payload.get("amount", order.get("net_amount", 0)))
+    error_msg = payload.get("error", "Declined by issuing bank.")
+    await db["orders"].update_one(
+        {"order_id": order_id},
+        {"$set": {"payment_status": "failed", "payment_error": error_msg}}
+    )
+    recipient = await _get_order_customer_email(order, db)
+
+    if recipient:
+        try:
+            from app.core.email import send_email
+            from app.core.templates import get_payment_failed_email
+            html = get_payment_failed_email(order["invoice_number"], amount, error_msg)
+            await send_email("payment_failed", recipient, "Payment Failed - Action Required", html)
+        except Exception:
+            pass
+
+    return {"success": True, "payment_status": "failed", "error_message": error_msg}
