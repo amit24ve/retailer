@@ -167,25 +167,59 @@ function SurfingIllustration() {
 }
 
 // ─── Date range selector ──────────────────────────────────────────────────────
-function DateRangeSelect({ value, onChange, options }) {
+function DateRangeSelect({ value, onChange, options, startDate, endDate, onStartDateChange, onEndDateChange }) {
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="appearance-none text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-300 cursor-pointer"
-      >
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+    <div className="flex items-center gap-2">
+      <div className="relative">
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="appearance-none text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-300 cursor-pointer"
+        >
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+      {value === 'custom' && (
+        <div className="flex items-center gap-1.5 animate-slide-up">
+          <input
+            type="date"
+            value={startDate}
+            onChange={e => onStartDateChange(e.target.value)}
+            className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+          />
+          <span className="text-xs text-slate-400">to</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={e => onEndDateChange(e.target.value)}
+            className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 function OverviewTab({ customers = [], total = 0, loading = false }) {
-  const [snapshotRange, setSnapshotRange] = useState('12m');
-  const [newRepeatRange, setNewRepeatRange] = useState('30d');
+  const [snapshotRange, setSnapshotRange] = useState('month');
+  const [newRepeatRange, setNewRepeatRange] = useState('month');
+
+  const [snapStartDate, setSnapStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [snapEndDate, setSnapEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+  const [newRepeatStartDate, setNewRepeatStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [newRepeatEndDate, setNewRepeatEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+
   const hasData = total > 0;
 
   const formatDateRangeLabel = (days) => {
@@ -197,20 +231,28 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
   };
 
   // Filter customers by selected range dynamically
-  const filterByRange = (list, range) => {
+  const filterByRange = (list, range, customStart, customEnd) => {
     const now = Date.now();
-    let days = 365;
-    if (range === '30d') days = 30;
-    else if (range === '90d') days = 90;
-    else if (range === '6m') days = 180;
-    else if (range === '12m') days = 365;
+    let days = 30;
+    if (range === 'week') days = 7;
+    else if (range === 'month') days = 30;
+    else if (range === 'year') days = 365;
+    else if (range === 'custom') {
+      const startMs = customStart ? new Date(customStart).getTime() : 0;
+      const endMs = customEnd ? new Date(customEnd + 'T23:59:59').getTime() : Date.now();
+      return list.filter(c => {
+        if (!c.created_at) return false;
+        const t = new Date(c.created_at).getTime();
+        return t >= startMs && t <= endMs;
+      });
+    }
     
     const cutoff = now - (days * 24 * 60 * 60 * 1000);
     return list.filter(c => c.created_at && new Date(c.created_at).getTime() >= cutoff);
   };
 
-  const filteredSnapshotCustomers = filterByRange(customers, snapshotRange);
-  const filteredNewRepeatCustomers = filterByRange(customers, newRepeatRange);
+  const filteredSnapshotCustomers = filterByRange(customers, snapshotRange, snapStartDate, snapEndDate);
+  const filteredNewRepeatCustomers = filterByRange(customers, newRepeatRange, newRepeatStartDate, newRepeatEndDate);
 
   const totalCustomers = total;
   const newCustomers = filteredSnapshotCustomers.length;
@@ -273,6 +315,24 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
   };
   const tierPie = getDynamicTierPie(filteredSnapshotCustomers);
 
+  const getDynamicCityData = (filteredList) => {
+    const citiesMap = {};
+    filteredList.forEach(c => {
+      const city = c.city || 'Unknown';
+      citiesMap[city] = (citiesMap[city] || 0) + 1;
+    });
+    const sorted = Object.keys(citiesMap).map(city => ({
+      city,
+      customers: citiesMap[city],
+    })).sort((a, b) => b.customers - a.customers);
+    const totalFiltered = filteredList.length;
+    return sorted.map(item => ({
+      ...item,
+      pct: totalFiltered > 0 ? Math.round(item.customers / totalFiltered * 100) : 0
+    })).slice(0, 5);
+  };
+  const cityData = getDynamicCityData(filteredSnapshotCustomers);
+
   return (
     <div className="space-y-6">
 
@@ -283,10 +343,15 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
           <DateRangeSelect
             value={snapshotRange}
             onChange={setSnapshotRange}
+            startDate={snapStartDate}
+            endDate={snapEndDate}
+            onStartDateChange={setSnapStartDate}
+            onEndDateChange={setSnapEndDate}
             options={[
-              { value: '12m', label: `Last 12 Months  ${formatDateRangeLabel(365)}` },
-              { value: '6m', label: `Last 6 Months  ${formatDateRangeLabel(180)}` },
-              { value: '30d', label: `Last 30 Days  ${formatDateRangeLabel(30)}` },
+              { value: 'week', label: `Week  ${formatDateRangeLabel(7)}` },
+              { value: 'month', label: `Month  ${formatDateRangeLabel(30)}` },
+              { value: 'year', label: `Year  ${formatDateRangeLabel(365)}` },
+              { value: 'custom', label: 'Custom Range' },
             ]}
           />
         </div>
@@ -322,11 +387,18 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
               <span className="text-[9px] text-slate-400 font-bold">i</span>
             </button>
           </div>
-          <DateRangeSelect value={newRepeatRange} onChange={setNewRepeatRange}
+          <DateRangeSelect 
+            value={newRepeatRange} 
+            onChange={setNewRepeatRange}
+            startDate={newRepeatStartDate}
+            endDate={newRepeatEndDate}
+            onStartDateChange={setNewRepeatStartDate}
+            onEndDateChange={setNewRepeatEndDate}
             options={[
-              { value: '30d', label: `Last 30 Days  ${formatDateRangeLabel(30)}` },
-              { value: '90d', label: `Last 90 Days  ${formatDateRangeLabel(90)}` },
-              { value: '12m', label: `Last 12 Months  ${formatDateRangeLabel(365)}` },
+              { value: 'week', label: `Week  ${formatDateRangeLabel(7)}` },
+              { value: 'month', label: `Month  ${formatDateRangeLabel(30)}` },
+              { value: 'year', label: `Year  ${formatDateRangeLabel(365)}` },
+              { value: 'custom', label: 'Custom Range' },
             ]}
           />
         </div>
@@ -437,18 +509,21 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
       <section className="bg-white border border-slate-200 rounded-2xl p-5">
         <h2 className="text-base font-bold text-slate-900 mb-4">Top Cities</h2>
         <div className="space-y-3">
-          {CITY_DATA.map((c, i) => (
+          {cityData.map((c, i) => (
             <div key={c.city} className="flex items-center gap-3">
               <span className="w-5 h-5 rounded-lg bg-slate-100 text-slate-600 text-xs flex items-center justify-center font-bold flex-shrink-0">{i + 1}</span>
               <span className="text-sm font-semibold text-slate-700 w-24">{c.city}</span>
               <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
                 <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${c.pct}%`, background: ['#c9b96e', '#c9b96e', '#f59e0b', '#f97316', '#ec4899'][i] }} />
+                  style={{ width: `${c.pct}%`, background: ['#c9b96e', '#c9b96e', '#f59e0b', '#f97316', '#ec4899'][i % 5] }} />
               </div>
               <span className="text-xs font-bold text-slate-700 w-14 text-right">{c.customers.toLocaleString('en-IN')}</span>
               <span className="text-xs text-slate-400 w-8 text-right">{c.pct}%</span>
             </div>
           ))}
+          {cityData.length === 0 && (
+            <p className="text-center text-xs text-slate-400 py-4">No city distribution data yet</p>
+          )}
         </div>
       </section>
 
@@ -690,8 +765,8 @@ function CustomerListTab({ onAddCustomer }) {
   useEffect(() => {
     setLoading(true);
     api.get('/customers', { params: { page, limit, search, tier } })
-      .then(r => { setCustomers(r.data.customers); setTotal(r.data.total); })
-      .catch(() => { setCustomers(MOCK_CUSTOMERS); setTotal(MOCK_CUSTOMERS.length); })
+      .then(r => { setCustomers(r.data.customers || []); setTotal(r.data.total || 0); })
+      .catch(() => { setCustomers([]); setTotal(0); })
       .finally(() => setLoading(false));
   }, [page, search, tier]);
 
