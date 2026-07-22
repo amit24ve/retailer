@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { format } from 'date-fns';
 import { PlusIcon, ShoppingBagIcon, XMarkIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
@@ -9,15 +9,55 @@ const statusBadge = (s) => {
   return <span className={m[s] || 'badge-info'}>{s}</span>;
 };
 
+const getStoreLabel = (order) => order.store_name || order.store_code || 'Unknown Store';
+
+const isToday = (value) => {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date();
+  return (
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  );
+};
+
+const getOrderAmount = (order) => Number(order.net_amount || order.gross_amount || 0);
+
+const buildStats = (sourceOrders) => {
+  const todayOrders = sourceOrders.filter((order) => isToday(order.created_at));
+  const revenue = todayOrders.reduce((sum, order) => sum + getOrderAmount(order), 0);
+  const pointsIssued = todayOrders.reduce((sum, order) => sum + Number(order.points_earned || 0), 0);
+  return {
+    revenue,
+    orderCount: todayOrders.length,
+    avgOrderValue: todayOrders.length ? Math.round(revenue / todayOrders.length) : 0,
+    pointsIssued,
+  };
+};
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
   const [posResult, setPosResult] = useState(null);
+  const [selectedStore, setSelectedStore] = useState('all');
+
+  const fetchOrders = () => {
+    setLoading(true);
+    api.get('/orders').then(r => setOrders(r.data.orders || [])).catch(() => setOrders(getMockOrders())).finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     api.get('/orders').then(r => setOrders(r.data.orders || [])).catch(() => setOrders(getMockOrders())).finally(() => setLoading(false));
   }, []);
+
+  const storeOptions = Array.from(new Set(orders.map(getStoreLabel))).sort();
+  const visibleOrders = selectedStore === 'all'
+    ? orders
+    : orders.filter((order) => getStoreLabel(order) === selectedStore);
+  const stats = buildStats(visibleOrders);
 
   return (
     <div className="space-y-5 animate-slide-up">
@@ -34,10 +74,10 @@ export default function OrdersPage() {
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "Today's Revenue", value: '₹2,84,210', color: 'text-emerald-400' },
-          { label: "Today's Orders", value: '142', color: 'text-cyan-400' },
-          { label: 'Avg Order Value', value: '₹2,001', color: 'text-gold-400' },
-          { label: 'Points Issued Today', value: '28,421', color: 'text-cyan-500' },
+          { label: "Today's Revenue", value: `₹${stats.revenue.toLocaleString('en-IN')}`, color: 'text-emerald-400' },
+          { label: "Today's Orders", value: stats.orderCount.toLocaleString('en-IN'), color: 'text-cyan-400' },
+          { label: 'Avg Order Value', value: `₹${stats.avgOrderValue.toLocaleString('en-IN')}`, color: 'text-gold-400' },
+          { label: 'Points Issued Today', value: stats.pointsIssued.toLocaleString('en-IN'), color: 'text-cyan-500' },
         ].map(s => (
           <div key={s.label} className="glass-card p-4">
             <p className="text-xs text-gray-400">{s.label}</p>
@@ -50,8 +90,15 @@ export default function OrdersPage() {
       <div className="glass-card overflow-hidden">
         <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-white">Recent Transactions</h2>
-          <select className="input-field w-auto text-xs py-1.5">
-            <option>All Stores</option><option>New Delhi Flagship</option><option>Mumbai Colaba</option>
+          <select
+            className="input-field w-auto text-xs py-1.5"
+            value={selectedStore}
+            onChange={(event) => setSelectedStore(event.target.value)}
+          >
+            <option value="all">All Stores</option>
+            {storeOptions.map((store) => (
+              <option key={store} value={store}>{store}</option>
+            ))}
           </select>
         </div>
         <div className="overflow-x-auto">
@@ -71,7 +118,7 @@ export default function OrdersPage() {
             <tbody>
               {loading ? [...Array(8)].map((_, i) => (
                 <tr key={i}>{[...Array(8)].map((_, j) => <td key={j}><div className="skeleton h-4 rounded" /></td>)}</tr>
-              )) : orders.map(o => (
+              )) : visibleOrders.map(o => (
                 <tr key={o.order_id || o._id}>
                   <td><span className="font-mono text-xs text-cyan-400">{o.invoice_number}</span></td>
                   <td><span className="text-xs">{o.customer_name || 'Walk-in'}</span></td>
@@ -88,7 +135,7 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {showPOS && <POSModal onClose={() => setShowPOS(false)} onSuccess={(res) => { setShowPOS(false); setPosResult(res); toast.success('Transaction processed!'); }} />}
+      {showPOS && <POSModal onClose={() => setShowPOS(false)} onSuccess={(res) => { setShowPOS(false); setPosResult(res); fetchOrders(); toast.success('Transaction processed!'); }} />}
       {posResult && <POSResultModal result={posResult} onClose={() => setPosResult(null)} />}
     </div>
   );

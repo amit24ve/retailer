@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { format } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
@@ -24,6 +24,15 @@ function getMockReferrals() {
     created_at: new Date(Date.now() - i * 86400000 * 3).toISOString(),
   }));
 }
+
+const normalizeChannels = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string' && value.trim()) {
+    if (value === 'both') return ['whatsapp', 'sms'];
+    return value.split(',').map(channel => channel.trim()).filter(Boolean);
+  }
+  return ['whatsapp'];
+};
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 function StepBar({ current, total, onBack, onNext, onSaveDraft, canProceed }) {
@@ -66,7 +75,7 @@ function StepBar({ current, total, onBack, onNext, onSaveDraft, canProceed }) {
 }
 
 // ─── Phone Preview — referral landing page ────────────────────────────────────
-function ReferralPhonePreview({ tab, rewardType, landingTitle, brandName }) {
+function ReferralPhonePreview({ tab, landingTitle, brandName }) {
   return (
     <div className="flex flex-col items-center">
       {/* Tab switcher above phone */}
@@ -311,10 +320,11 @@ function Step2({ config, onChange }) {
 
 // ─── Step 3: Channel selection ────────────────────────────────────────────────
 function Step3({ config, onChange }) {
+  const selectedChannels = normalizeChannels(config.channels);
   const toggleChannel = (ch) => {
-    const channels = config.channels.includes(ch)
-      ? config.channels.filter(c => c !== ch)
-      : [...config.channels, ch];
+    const channels = selectedChannels.includes(ch)
+      ? selectedChannels.filter(c => c !== ch)
+      : [...selectedChannels, ch];
     onChange({ ...config, channels });
   };
   return (
@@ -329,14 +339,21 @@ function Step3({ config, onChange }) {
           { v: 'sms', icon: '📱', label: 'SMS', desc: 'Send via text message' },
           { v: 'email', icon: '✉️', label: 'Email', desc: 'Send via email' },
         ].map(ch => {
-          const active = config.channels.includes(ch.v);
+          const active = selectedChannels.includes(ch.v);
           return (
-            <label key={ch.v}
-              className="flex items-center justify-between px-4 py-4 rounded-2xl border-2 cursor-pointer transition-all"
+            <label
+              key={ch.v}
+              className="w-full flex items-center justify-between px-4 py-4 rounded-2xl border-2 cursor-pointer transition-all text-left select-none"
               style={{
                 borderColor: active ? '#a89442' : '#e2e8f0',
                 background: active ? '#f0fdfa' : 'white',
               }}>
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={active}
+                onChange={() => toggleChannel(ch.v)}
+              />
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-xl">{ch.icon}</div>
                 <div>
@@ -354,7 +371,6 @@ function Step3({ config, onChange }) {
               <div
                 className="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all flex-shrink-0"
                 style={{ borderColor: active ? '#a89442' : '#cbd5e1', background: active ? '#a89442' : 'white' }}
-                onClick={() => toggleChannel(ch.v)}
               >
                 {active && <CheckIcon className="w-3 h-3 text-white" />}
               </div>
@@ -377,7 +393,7 @@ function Step4({ config }) {
           { label: 'Referrer reward', value: `${config.referrerReward === 'points' ? '' : config.referrerReward === 'flat' ? '₹' : ''}${config.referrerValue || '—'}${config.referrerReward === 'points' ? ' pts' : config.referrerReward === 'percent' ? '%' : ''} ${config.referrerReward !== 'points' ? 'Off' : 'Bonus Points'}` },
           { label: 'Landing page title', value: config.landingTitle || 'Not set' },
           { label: 'Reward expires', value: config.expiryDays ? `${config.expiryDays} days after claiming` : 'No expiry' },
-          { label: 'Channels', value: config.channels.join(', ') || 'None selected' },
+          { label: 'Channels', value: normalizeChannels(config.channels).join(', ') || 'None selected' },
         ].map(r => (
           <div key={r.label} className="flex items-center justify-between px-4 py-3 bg-slate-50 rounded-xl">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{r.label}</span>
@@ -605,16 +621,27 @@ function ActivityTable({ referrals, loading, onView, onDelete }) {
 }
 
 // ─── Record Referral Modal ────────────────────────────────────────────────────
-function RecordReferralModal({ onClose, onSaved }) {
+function RecordReferralModal({ onClose, onSaved, defaultChannels = ['whatsapp'] }) {
+  const initialChannels = normalizeChannels(defaultChannels);
   const [form, setForm] = useState({
     referrer_name: '',
     referred_name: '',
     referred_mobile: '',
+    referred_email: '',
     status: 'pending',
-    channel: 'whatsapp',
+    channel: initialChannels[0] || 'whatsapp',
+    channels: initialChannels,
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const toggleChannel = (ch) => {
+    setForm((f) => {
+      const exists = f.channels.includes(ch);
+      const channels = exists ? f.channels.filter(c => c !== ch) : [...f.channels, ch];
+      const nextChannels = channels.length ? channels : [ch];
+      return { ...f, channels: nextChannels, channel: nextChannels[0] };
+    });
+  };
 
   const handleSave = async () => {
     if (!form.referrer_name.trim() || !form.referred_mobile.trim()) {
@@ -623,11 +650,21 @@ function RecordReferralModal({ onClose, onSaved }) {
     }
     setSaving(true);
     try {
-      await api.post('/referrals', form);
-      toast.success('Referral recorded! 🤝');
+      const payload = {
+        ...form,
+        channel: form.channels.length === 2 && form.channels.includes('sms') && form.channels.includes('whatsapp') ? 'both' : form.channels[0],
+        channels: normalizeChannels(form.channels),
+      };
+      const res = await api.post('/referrals', payload);
+      const send = res.data?.send_result;
+      if (send) {
+        toast.success(`Referral recorded. Sent: ${send.sent || 0}, Failed: ${send.failed || 0}`);
+      } else {
+        toast.success('Referral recorded! 🤝');
+      }
       onSaved();
-    } catch {
-      toast.error('Failed to record referral');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to record referral');
     } finally {
       setSaving(false);
     }
@@ -663,6 +700,13 @@ function RecordReferralModal({ onClose, onSaved }) {
                 value={form.referred_mobile} onChange={e => set('referred_mobile', e.target.value)} placeholder="+91…" />
             </div>
           </div>
+          {form.channels.includes('email') && (
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">Friend Email</label>
+              <input className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                value={form.referred_email} onChange={e => set('referred_email', e.target.value)} placeholder="friend@example.com" />
+            </div>
+          )}
           <div>
             <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">Status</label>
             <select className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"
@@ -673,6 +717,28 @@ function RecordReferralModal({ onClose, onSaved }) {
               <option value="rewarded">Rewarded</option>
               <option value="expired">Expired</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">Send Via</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { v: 'whatsapp', label: 'WhatsApp' },
+                { v: 'sms', label: 'SMS' },
+                { v: 'email', label: 'Email' },
+              ].map(ch => {
+                const active = form.channels.includes(ch.v);
+                return (
+                  <button
+                    key={ch.v}
+                    type="button"
+                    onClick={() => toggleChannel(ch.v)}
+                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${active ? 'border-amber-600 bg-cyan-50 text-amber-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    {ch.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="flex items-center gap-2 pt-1">
             <button onClick={onClose} className="flex-1 py-2.5 text-sm font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
@@ -763,7 +829,7 @@ export default function ReferralsPage() {
   const [step, setStep] = useState(1);
   const [referrals, setReferrals] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [previewTab, setPreviewTab] = useState('New customer page');
+  const [previewTab] = useState('New customer page');
   const [activeTab, setActiveTab] = useState('overview');   // overview | sent
   const [showRecord, setShowRecord] = useState(false);
   const [viewingRef, setViewingRef] = useState(null);
@@ -788,8 +854,19 @@ export default function ReferralsPage() {
   };
 
   useEffect(() => {
-    if (view === 'active') fetchReferrals();
+    if (view === 'active') Promise.resolve().then(fetchReferrals);
   }, [view]);
+
+  useEffect(() => {
+    api.get('/referrals/program')
+      .then((r) => {
+        if (r.data?.program) {
+          setConfig((prev) => ({ ...prev, ...r.data.program, channels: normalizeChannels(r.data.program.channels || r.data.program.channel) }));
+          setView('active');
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const TOTAL_STEPS = 4;
 
@@ -857,14 +934,13 @@ export default function ReferralsPage() {
           current={step} total={TOTAL_STEPS}
           onBack={handleBack} onNext={handleNext}
           onSaveDraft={() => toast.success('Saved as draft!')}
-          canProceed={true}
+          canProceed={step !== 3 || normalizeChannels(config.channels).length > 0}
         />
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
           {/* Left: Phone preview */}
           <div className="xl:sticky xl:top-4">
             <ReferralPhonePreview
               tab={previewTab}
-              rewardType={config.rewardType}
               landingTitle={config.landingTitle}
               brandName={user?.brand_name}
             />
@@ -977,6 +1053,7 @@ export default function ReferralsPage() {
       {/* Modals */}
       {showRecord && (
         <RecordReferralModal
+          defaultChannels={config.channels}
           onClose={() => setShowRecord(false)}
           onSaved={() => { setShowRecord(false); setActiveTab('sent'); fetchReferrals(); }}
         />
@@ -990,5 +1067,3 @@ export default function ReferralsPage() {
     </div>
   );
 }
-
-

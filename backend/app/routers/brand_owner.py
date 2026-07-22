@@ -5,7 +5,7 @@ Brand Owner routes for credit management:
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,6 +30,120 @@ class CreditRefillRequest(BaseModel):
     wa_utility: Optional[int] = 0
     wa_marketing: Optional[int] = 0
     note: Optional[str] = None
+
+
+def _first_value(*values, default=None):
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return default
+
+
+def _normalize_plan_key(value: str | None) -> str:
+    key = (value or "free_trial").lower().replace(" ", "_").replace("-", "_")
+    if key in {"enterprise", "growth", "growth_premium", "premium"}:
+        return "growth_premium"
+    if key in {"free", "forever_free", "base"}:
+        return "forever_free"
+    if key in {"trial", "demo", "free_trial"}:
+        return "free_trial"
+    return key
+
+
+def _plan_defaults(plan_key: str) -> dict:
+    defaults = {
+        "forever_free": {
+            "name": "Forever Free tier",
+            "badge": "Current Plan",
+            "price_monthly": 0,
+            "price_yearly": 0,
+            "price_half_yearly": 0,
+            "billing_label": "forever free",
+            "features": [
+                "Basic Campaigns (SMS & Email)",
+                "Simple Customer Registry",
+                "General Sales Overview",
+            ],
+        },
+        "free_trial": {
+            "name": "Free Business Trial",
+            "badge": "Running Demo",
+            "price_monthly": 0,
+            "price_yearly": 0,
+            "price_half_yearly": 0,
+            "billing_label": "trial",
+            "features": [
+                "Basic Campaigns (SMS & Email)",
+                "Simple Customer Registry",
+                "General Sales Overview",
+            ],
+        },
+        "growth_premium": {
+            "name": "Growth Premium package",
+            "badge": "Active Plan",
+            "price_monthly": 3250,
+            "price_yearly": 39000,
+            "price_half_yearly": 22500,
+            "billing_label": "month per store",
+            "features": [
+                "Branded Loyalty Program",
+                "Automated Feedback & NPS",
+                "Google Reviews Integration",
+                "Set-and-Forget Auto-Campaigns",
+                "WhatsApp Blast Campaigns",
+                "Dual-Incentive Referrals",
+                "Paid Membership Tiers",
+                "Dynamic Smart QR Coupons",
+                "Retention Analytics & Funnels",
+                "24/7 Priority VIP Support",
+            ],
+        },
+    }
+    return defaults.get(plan_key, defaults["free_trial"])
+
+
+def _build_subscription(brand: dict, tenant: dict | None) -> dict:
+    subscription = brand.get("subscription") or brand.get("billing") or {}
+    raw_plan = _first_value(
+        subscription.get("plan_id"),
+        subscription.get("plan"),
+        brand.get("billing_plan"),
+        tenant.get("billing_plan") if tenant else None,
+        default="free_trial",
+    )
+    plan_key = _normalize_plan_key(raw_plan)
+    defaults = _plan_defaults(plan_key)
+    created_at = brand.get("created_at") or datetime.utcnow()
+    fallback_trial_end = created_at + timedelta(days=30) if isinstance(created_at, datetime) else None
+    trial_expires_at = _first_value(
+        subscription.get("trial_expires_at"),
+        subscription.get("trial_end"),
+        brand.get("trial_expires_at"),
+        fallback_trial_end,
+    )
+    current_period_end = _first_value(
+        subscription.get("current_period_end"),
+        subscription.get("expires_at"),
+        brand.get("plan_expires_at"),
+        trial_expires_at,
+    )
+
+    return {
+        "plan_id": plan_key,
+        "name": _first_value(subscription.get("name"), brand.get("plan_name"), defaults["name"]),
+        "status": _first_value(subscription.get("status"), brand.get("subscription_status"), brand.get("status"), default="active"),
+        "badge": _first_value(subscription.get("badge"), defaults["badge"]),
+        "billing_cycle": _first_value(subscription.get("billing_cycle"), brand.get("billing_cycle"), default="yearly"),
+        "currency": brand.get("currency", "INR"),
+        "price_monthly": _first_value(subscription.get("price_monthly"), brand.get("price_monthly"), defaults["price_monthly"]),
+        "price_yearly": _first_value(subscription.get("price_yearly"), brand.get("price_yearly"), defaults["price_yearly"]),
+        "price_half_yearly": _first_value(subscription.get("price_half_yearly"), brand.get("price_half_yearly"), defaults["price_half_yearly"]),
+        "billing_label": _first_value(subscription.get("billing_label"), defaults["billing_label"]),
+        "features": subscription.get("features") or brand.get("plan_features") or defaults["features"],
+        "trial_expires_at": trial_expires_at,
+        "current_period_end": current_period_end,
+        "started_at": _first_value(subscription.get("started_at"), brand.get("created_at")),
+    }
 
 
 # ─── POST /brand-owner/credit-request ─────────────────────────────────────────
@@ -119,6 +233,61 @@ async def get_my_credit_requests(
         result.append(r)
 
     return {"requests": result, "total": len(result)}
+
+
+@router.get("/settings-summary")
+async def get_settings_summary(
+    db=Depends(get_database),
+    current_user=Depends(require_brand_owner),
+):
+    """Brand Owner settings data for channels, credits, and current plan."""
+    brand_id = current_user.get("brand_id")
+    if not brand_id:
+        return {
+            "brand": {},
+            "credits": {"sms": 0, "email": 0, "wa_utility": 0, "wa_marketing": 0},
+            "channels": {},
+            "subscription": _build_subscription({}, None),
+        }
+
+    brand = await db["brands"].find_one({"brand_id": brand_id}, {"_id": 0}) or {}
+    tenant = None
+    if brand.get("tenant_id") or current_user.get("tenant_id"):
+        tenant = await db["tenants"].find_one(
+            {"tenant_id": brand.get("tenant_id") or current_user.get("tenant_id")},
+            {"_id": 0, "billing_plan": 1},
+        )
+
+    credits = brand.get("credits") or {
+        "sms": 0,
+        "email": 0,
+        "wa_utility": 0,
+        "wa_marketing": 0,
+    }
+    messaging = ((brand.get("settings") or {}).get("messaging") or {})
+    channels = brand.get("channels") or {}
+
+    return {
+        "brand": {
+            "brand_id": brand.get("brand_id"),
+            "name": brand.get("name") or current_user.get("brand_name"),
+            "status": brand.get("status"),
+            "currency": brand.get("currency", "INR"),
+        },
+        "credits": credits,
+        "channels": {
+            "sms": {
+                "sender_id": messaging.get("custom_sender_id") or messaging.get("sender_id"),
+                "header_mode": messaging.get("sms_header_mode", "default"),
+            },
+            "email": channels.get("email") or {
+                "sender": brand.get("email_sender") or current_user.get("email"),
+            },
+            "whatsapp_utility": channels.get("whatsapp_utility") or {},
+            "whatsapp_marketing": channels.get("whatsapp_marketing") or {},
+        },
+        "subscription": _build_subscription(brand, tenant),
+    }
 
 
 # ─── GET /brand-owner/credits ──────────────────────────────────────────────────
@@ -457,4 +626,3 @@ async def process_payout(
         pass
 
     return {"success": True, "amount": amount, "bank_account": bank_account}
-

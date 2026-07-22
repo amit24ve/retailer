@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,9 +6,7 @@ import toast from 'react-hot-toast';
 import {
   ArrowRightIcon, ChevronDownIcon, CheckIcon,
   ShareIcon, PlayIcon, XMarkIcon, PencilIcon,
-  GiftIcon, UserGroupIcon, SparklesIcon, ChartBarIcon,
-  ChatBubbleLeftRightIcon, ShieldCheckIcon, CalendarIcon,
-  ArrowTopRightOnSquareIcon, DocumentDuplicateIcon, CheckCircleIcon
+  GiftIcon, ShieldCheckIcon, CheckCircleIcon
 } from '@heroicons/react/24/outline';
 
 // ─── Mock referral data ───────────────────────────────────────────────────────
@@ -26,6 +24,15 @@ function getMockReferrals() {
     created_at: new Date(Date.now() - i * 86400000 * 1.5).toISOString(),
   }));
 }
+
+const normalizeChannels = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string' && value.trim()) {
+    if (value === 'both') return ['whatsapp', 'sms'];
+    return value.split(',').map(channel => channel.trim()).filter(Boolean);
+  }
+  return ['whatsapp'];
+};
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 function StepBar({ current, total, onBack, onNext, onSaveDraft, canProceed }) {
@@ -442,10 +449,11 @@ function Step2({ config, onChange }) {
 
 // ─── Step 3: Channel selection ────────────────────────────────────────────────
 function Step3({ config, onChange }) {
+  const selectedChannels = normalizeChannels(config.channels);
   const toggleChannel = (ch) => {
-    const channels = config.channels.includes(ch)
-      ? config.channels.filter(c => c !== ch)
-      : [...config.channels, ch];
+    const channels = selectedChannels.includes(ch)
+      ? selectedChannels.filter(c => c !== ch)
+      : [...selectedChannels, ch];
     onChange({ ...config, channels });
   };
   return (
@@ -465,16 +473,21 @@ function Step3({ config, onChange }) {
           { v: 'sms', icon: '📱', label: 'Transactional SMS', desc: 'Standard carrier text message delivery' },
           { v: 'email', icon: '✉️', label: 'Smart Email Newsletters', desc: 'Direct high-fidelity email layout delivery' },
         ].map(ch => {
-          const active = config.channels.includes(ch.v);
+          const active = selectedChannels.includes(ch.v);
           return (
-            <div key={ch.v}
-              onClick={() => toggleChannel(ch.v)}
-              className="flex items-center justify-between px-5 py-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 hover:border-indigo-200"
+            <label key={ch.v}
+              className="flex items-center justify-between px-5 py-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 hover:border-indigo-200 select-none"
               style={{
                 borderColor: active ? '#6366f1' : '#f1f5f9',
                 background: active ? '#f5f3ff' : 'white',
                 boxShadow: active ? '0 4px 12px rgba(99, 102, 241, 0.04)' : 'none'
               }}>
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={active}
+                onChange={() => toggleChannel(ch.v)}
+              />
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-slate-100/80 flex items-center justify-center text-xl">{ch.icon}</div>
                 <div>
@@ -498,7 +511,7 @@ function Step3({ config, onChange }) {
               >
                 {active && <CheckIcon className="w-3.5 h-3.5 text-white stroke-[3px]" />}
               </div>
-            </div>
+            </label>
           );
         })}
       </div>
@@ -563,7 +576,7 @@ function Step4({ config }) {
 }
 
 // ─── "How it works" video section ────────────────────────────────────────────
-function HowItWorksSection({ userName, onStart }) {
+function HowItWorksSection({ onStart }) {
   const [showVideo, setShowVideo] = useState(false);
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-0 min-h-[460px] rounded-3xl overflow-hidden border border-slate-150 bg-white shadow-sm hover:shadow-md transition-all duration-300">
@@ -844,8 +857,10 @@ export default function ReferralsPage() {
 
   useEffect(() => {
     if (view === 'active') {
-      setLoading(true);
-      api.get('/referrals').then(r => setReferrals(r.data.referrals || [])).catch(() => setReferrals(getMockReferrals())).finally(() => setLoading(false));
+      Promise.resolve().then(() => {
+        setLoading(true);
+        api.get('/referrals').then(r => setReferrals(r.data.referrals || [])).catch(() => setReferrals(getMockReferrals())).finally(() => setLoading(false));
+      });
     }
   }, [view]);
 
@@ -888,7 +903,7 @@ export default function ReferralsPage() {
           </button>
         </div>
         
-        <HowItWorksSection userName={user?.full_name?.split(' ')[0]} onStart={() => { setStep(1); setView('setup'); }} />
+        <HowItWorksSection onStart={() => { setStep(1); setView('setup'); }} />
       </div>
     );
   }

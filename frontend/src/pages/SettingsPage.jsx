@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { 
   CheckIcon, PlusIcon, ChevronRightIcon,
   UserIcon, BuildingStorefrontIcon, UserGroupIcon, 
-  ShareIcon, TicketIcon, ShieldCheckIcon, CalendarIcon,
+  ShareIcon, CalendarIcon,
   CreditCardIcon, DocumentTextIcon, KeyIcon
 } from '@heroicons/react/24/outline';
 
@@ -43,6 +43,55 @@ const PAGE_TITLES = {
   faq:      'FAQ',
   plan:     'My Plan',
 };
+
+const formatNumber = (value) => Number(value || 0).toLocaleString('en-IN');
+
+const formatCurrency = (value) => `₹${Number(value || 0).toLocaleString('en-IN')}`;
+
+const formatDate = (value) => {
+  if (!value) return 'Not set';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not set';
+  return date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+};
+
+const daysBetween = (start, end) => Math.max(0, Math.ceil((end - start) / 86400000));
+
+const getPlanProgress = (subscription) => {
+  const end = new Date(subscription?.current_period_end || subscription?.trial_expires_at || '');
+  if (Number.isNaN(end.getTime())) return { pct: 0, daysLeft: 0 };
+  const start = new Date(subscription?.started_at || Date.now());
+  const now = new Date();
+  const total = Math.max(1, end - (Number.isNaN(start.getTime()) ? now : start));
+  const elapsed = Math.min(total, Math.max(0, now - (Number.isNaN(start.getTime()) ? now : start)));
+  return {
+    pct: Math.max(4, Math.min(100, Math.round((elapsed / total) * 100))),
+    daysLeft: daysBetween(now, end),
+  };
+};
+
+const DEFAULT_FREE_FEATURES = [
+  'Basic Campaigns (SMS & Email)',
+  'Simple Customer Registry',
+  'General Sales Overview',
+];
+
+const DEFAULT_GROWTH_FEATURES = [
+  'Branded Loyalty Program',
+  'Automated Feedback & NPS',
+  'Google Reviews Integration',
+  'Set-and-Forget Auto-Campaigns',
+  'WhatsApp Blast Campaigns',
+  'Dual-Incentive Referrals',
+  'Paid Membership Tiers',
+  'Dynamic Smart QR Coupons',
+  'Retention Analytics & Funnels',
+  '24/7 Priority VIP Support',
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ACCOUNT DETAILS
@@ -522,7 +571,7 @@ function TeamTab({ user }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CHANNELS
 // ─────────────────────────────────────────────────────────────────────────────
-function ChannelsTab({ setupIntent }) {
+function ChannelsTab({ setupIntent, settingsSummary, creditBalances, loadingCredits }) {
   const [activeChannel, setActiveChannel] = useState(null);
   const [setupModal, setSetupModal] = useState(null);
   const [channelForm, setChannelForm] = useState({
@@ -534,7 +583,7 @@ function ChannelsTab({ setupIntent }) {
 
   useEffect(() => {
     if (setupIntent === 'whatsapp' || setupIntent === 'sms') {
-      setSetupModal(setupIntent);
+      Promise.resolve().then(() => setSetupModal(setupIntent));
     }
   }, [setupIntent]);
 
@@ -575,27 +624,34 @@ function ChannelsTab({ setupIntent }) {
     }
   };
 
+  const credits = creditBalances || settingsSummary?.credits || {};
+  const channelSettings = settingsSummary?.channels || {};
+  const smsSenderId = channelSettings.sms?.sender_id || channelForm.custom_sender_id || 'Default Header';
+  const emailSender = channelSettings.email?.sender || channelSettings.email?.from_email || 'Not configured';
+  const waUtilityId = channelSettings.whatsapp_utility?.phone_number_id || channelSettings.whatsapp_utility?.business_name || 'Not configured';
+  const waMarketingId = channelSettings.whatsapp_marketing?.phone_number_id || channelSettings.whatsapp_marketing?.business_name || 'Not configured';
+
   const CHANNELS = [
     { id: 'sms',      label: 'SMS Channel',          color: '#3b82f6', bg: 'from-blue-50/50 to-blue-50/10', icon: () => (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
       </svg>
-    ), limit: '32,450 credits left', code: 'CUBEN-SMS' },
+    ), limit: loadingCredits ? 'Loading credits...' : `${formatNumber(credits.sms)} credits left`, code: smsSenderId },
     { id: 'email',    label: 'Email Dispatch',        color: '#f97316', bg: 'from-orange-50/50 to-orange-50/10', icon: () => (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
       </svg>
-    ), limit: 'Unlimited broadcasts', code: 'no-reply@brand.com' },
+    ), limit: loadingCredits ? 'Loading credits...' : `${formatNumber(credits.email)} email credits left`, code: emailSender },
     { id: 'wa-util',  label: 'WhatsApp Utility',     color: '#10b981', bg: 'from-emerald-50/50 to-emerald-50/10', icon: () => (
       <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
         <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
       </svg>
-    ), limit: 'Transactional updates', code: 'WA-UTIL-908' },
+    ), limit: loadingCredits ? 'Loading credits...' : `${formatNumber(credits.wa_utility)} utility credits`, code: waUtilityId },
     { id: 'wa-mkt',   label: 'WhatsApp Promo',       color: '#ec4899', bg: 'from-pink-50/50 to-pink-50/10', icon: () => (
       <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
         <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
       </svg>
-    ), limit: '6,200 promotional shots', code: 'WA-MKT-REELO' },
+    ), limit: loadingCredits ? 'Loading credits...' : `${formatNumber(credits.wa_marketing)} promotional credits`, code: waMarketingId },
   ];
 
   return (
@@ -770,7 +826,15 @@ function FAQTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadFaqs(); }, []);
+  useEffect(() => {
+    api.get('/faqs')
+      .then(r => setFaqs(r.data.faqs || []))
+      .catch(() => {
+        const saved = localStorage.getItem('retailer_faqs');
+        setFaqs(saved ? JSON.parse(saved) : []);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const resetForm = () => {
     setEditing(null);
@@ -899,21 +963,27 @@ function FAQTab() {
 // ─────────────────────────────────────────────────────────────────────────────
 // MY PLAN
 // ─────────────────────────────────────────────────────────────────────────────
-function PlanTab() {
+function PlanTab({ settingsSummary, loadingSettings }) {
   const [planTab, setPlanTab] = useState('subscription');
   const [billing, setBilling] = useState('yearly');
 
-  const GROWTH_FEATURES = [
-    'Branded Loyalty Program', 'Automated Feedback & NPS', 'Google Reviews Integration',
-    'Set-and-Forget Auto-Campaigns', 'WhatsApp Blast Campaigns', 'Dual-Incentive Referrals',
-    'Paid Membership Tiers', 'Dynamic Smart QR Coupons', 'Retention Analytics & Funnels',
-    '24/7 Priority VIP Support',
-  ];
-  const FREE_FEATURES = [
-    'Basic Campaigns (SMS & Email)',
-    'Simple Customer Registry',
-    'General Sales Overview',
-  ];
+  const subscription = settingsSummary?.subscription || {};
+  const currentPlanId = subscription.plan_id || 'free_trial';
+  const isFreeCurrent = currentPlanId === 'forever_free' || currentPlanId === 'free_trial';
+  const isGrowthCurrent = currentPlanId === 'growth_premium';
+  const planProgress = getPlanProgress(subscription);
+  const currentPlanName = loadingSettings ? 'Loading current plan...' : (subscription.name || 'Free Business Trial');
+  const currentBadge = subscription.badge || subscription.status || 'Active';
+  const currentExpiryLabel = currentPlanId === 'free_trial' ? 'Trial expiration date' : 'Current period ends';
+  const currentExpiryDate = formatDate(subscription.current_period_end || subscription.trial_expires_at);
+  const freeFeatures = isFreeCurrent && subscription.features?.length ? subscription.features : DEFAULT_FREE_FEATURES;
+  const growthFeatures = isGrowthCurrent && subscription.features?.length ? subscription.features : DEFAULT_GROWTH_FEATURES;
+  const growthMonthlyPrice = isGrowthCurrent ? subscription.price_monthly : 3250;
+  const growthYearlyPrice = isGrowthCurrent ? subscription.price_yearly : 39000;
+  const growthHalfYearlyPrice = isGrowthCurrent ? subscription.price_half_yearly : 22500;
+  const growthBillingText = billing === 'half'
+    ? `Billed half yearly (${formatCurrency(growthHalfYearlyPrice)} per store)`
+    : `Billed annually (${formatCurrency(growthYearlyPrice)} per store)`;
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -942,16 +1012,19 @@ function PlanTab() {
             <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2.5 mb-1.5">
-                  <h3 className="text-base font-black text-slate-900">Free Business Trial</h3>
+                  <h3 className="text-base font-black text-slate-900">{currentPlanName}</h3>
                   <span className="text-[9px] font-extrabold text-white bg-pink-500 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    Running Demo
+                    {currentBadge}
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Trial expiration date</p>
-                <p className="text-xs font-black text-slate-700 mt-0.5">19 December 2026</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{currentExpiryLabel}</p>
+                <p className="text-xs font-black text-slate-700 mt-0.5">{currentExpiryDate}</p>
+                {planProgress.daysLeft > 0 && (
+                  <p className="text-[10px] text-indigo-600 font-bold mt-1">{planProgress.daysLeft} days left</p>
+                )}
               </div>
               <div className="w-full sm:w-48 bg-slate-100 h-2 rounded-full overflow-hidden relative shadow-inner flex-shrink-0">
-                <div className="h-full bg-indigo-500 rounded-full" style={{ width: '40%' }} />
+                <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${planProgress.pct}%` }} />
               </div>
             </div>
           </div>
@@ -985,7 +1058,7 @@ function PlanTab() {
                 </div>
                 <p className="text-[10px] font-extrabold text-slate-450 uppercase tracking-wide mb-3">Included features</p>
                 <div className="space-y-3">
-                  {FREE_FEATURES.map(f => (
+                  {freeFeatures.map(f => (
                     <div key={f} className="flex items-center gap-2.5">
                       <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
                         <CheckIcon className="w-3 h-3 text-slate-555 stroke-[3px]" />
@@ -995,8 +1068,8 @@ function PlanTab() {
                   ))}
                 </div>
               </div>
-              <button className="btn-secondary w-full py-2.5 justify-center mt-6 disabled:opacity-50 text-xs font-bold" disabled>
-                Current Plan
+              <button className="btn-secondary w-full py-2.5 justify-center mt-6 disabled:opacity-50 text-xs font-bold" disabled={isFreeCurrent}>
+                {isFreeCurrent ? 'Current Plan' : 'Available Plan'}
               </button>
             </div>
 
@@ -1014,14 +1087,14 @@ function PlanTab() {
                 </div>
                 <p className="text-base font-black text-slate-800 mt-1">Growth Premium package</p>
                 <div className="flex items-baseline gap-1 mt-3 mb-1">
-                  <span className="text-3xl font-black text-slate-900">₹3,250</span>
-                  <span className="text-xs text-slate-450 font-bold">/month per store</span>
+                  <span className="text-3xl font-black text-slate-900">{formatCurrency(growthMonthlyPrice)}</span>
+                  <span className="text-xs text-slate-450 font-bold">/{subscription.billing_label || 'month per store'}</span>
                 </div>
-                <p className="text-[10px] text-slate-450 font-semibold border-b border-slate-100 pb-4 mb-4">Billed annually (Save ₹12,000 yearly)</p>
+                <p className="text-[10px] text-slate-450 font-semibold border-b border-slate-100 pb-4 mb-4">{growthBillingText}</p>
                 
                 <p className="text-[10px] font-extrabold text-indigo-600 uppercase tracking-wide mb-3">All Free features, plus</p>
                 <div className="space-y-3">
-                  {GROWTH_FEATURES.map(f => (
+                  {growthFeatures.map(f => (
                     <div key={f} className="flex items-center gap-2.5">
                       <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 border border-indigo-200">
                         <CheckIcon className="w-3 h-3 text-indigo-700 stroke-[3px]" />
@@ -1034,9 +1107,10 @@ function PlanTab() {
               
               <button 
                 onClick={() => toast.success('Upgrade checkout initiated')}
+                disabled={isGrowthCurrent}
                 className="btn-primary w-full py-2.5 mt-6 shadow-lg shadow-indigo-200"
               >
-                Upgrade Store Platform
+                {isGrowthCurrent ? 'Current Plan' : 'Upgrade Store Platform'}
               </button>
             </div>
           </div>
@@ -1085,12 +1159,35 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState(() => {
     return location.state?.activeTab || 'account';
   });
+  const [settingsSummary, setSettingsSummary] = useState(null);
+  const [creditBalances, setCreditBalances] = useState(null);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [loadingCredits, setLoadingCredits] = useState(true);
 
   useEffect(() => {
     if (location.state?.activeTab) {
-      setActiveTab(location.state.activeTab);
+      Promise.resolve().then(() => setActiveTab(location.state.activeTab));
     }
   }, [location.state]);
+
+  useEffect(() => {
+    api.get('/brand-owner/settings-summary')
+      .then(r => setSettingsSummary(r.data || null))
+      .catch(() => setSettingsSummary(null))
+      .finally(() => setLoadingSettings(false));
+  }, []);
+
+  useEffect(() => {
+    api.get('/brand-owner/credits')
+      .then(r => setCreditBalances(r.data || null))
+      .catch(() => setCreditBalances(null))
+      .finally(() => setLoadingCredits(false));
+  }, []);
+
+  const subscription = settingsSummary?.subscription || {};
+  const planProgress = getPlanProgress(subscription);
+  const brandName = settingsSummary?.brand?.name || user?.brand_name || 'Cuben Retailer';
+  const planName = subscription.name || 'Free Trial';
 
   return (
     <div className="flex h-full overflow-hidden bg-white animate-slide-up rounded-3xl border border-slate-150">
@@ -1101,10 +1198,10 @@ export default function SettingsPage() {
         {/* Brand logo container */}
         <div className="flex items-center gap-2.5 px-4 py-5 border-b border-slate-150 bg-slate-100/30">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-pink-500 shadow-sm">
-            <span className="font-black text-sm text-white">C</span>
+            <span className="font-black text-sm text-white">{brandName.charAt(0).toUpperCase()}</span>
           </div>
           <div>
-            <span className="text-xs font-black tracking-tight text-slate-800 block leading-none">Cuben Retailer</span>
+            <span className="text-xs font-black tracking-tight text-slate-800 block leading-none">{brandName}</span>
             <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider block mt-1.5">Settings console</span>
           </div>
         </div>
@@ -1148,10 +1245,14 @@ export default function SettingsPage() {
         <div className="px-4 pb-5 space-y-3 pt-4 border-t border-slate-150 bg-slate-100/20">
           <div className="bg-indigo-50/50 border border-indigo-100/50 rounded-2xl p-3">
             <span className="text-[8px] font-extrabold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-full uppercase tracking-wider">
-              Free Trial
+              {loadingSettings ? 'Loading Plan' : planName}
             </span>
             <p className="text-[10px] text-slate-550 leading-relaxed mt-2 font-semibold">
-              You have <span className="font-extrabold text-indigo-600">10 days left</span> in your evaluation tier.
+              {planProgress.daysLeft > 0 ? (
+                <>You have <span className="font-extrabold text-indigo-600">{planProgress.daysLeft} days left</span> in your current plan.</>
+              ) : (
+                <>Your current plan status is <span className="font-extrabold text-indigo-600">{subscription.status || 'active'}</span>.</>
+              )}
             </p>
           </div>
           <button
@@ -1174,9 +1275,16 @@ export default function SettingsPage() {
           {activeTab === 'account'  && <AccountTab user={user} />}
           {activeTab === 'store'    && <StoreTab user={user} />}
           {activeTab === 'team'     && <TeamTab user={user} />}
-          {activeTab === 'channels' && <ChannelsTab setupIntent={location.state?.setup} />}
+          {activeTab === 'channels' && (
+            <ChannelsTab
+              setupIntent={location.state?.setup}
+              settingsSummary={settingsSummary}
+              creditBalances={creditBalances}
+              loadingCredits={loadingCredits}
+            />
+          )}
           {activeTab === 'faq'      && <FAQTab />}
-          {activeTab === 'plan'     && <PlanTab />}
+          {activeTab === 'plan'     && <PlanTab settingsSummary={settingsSummary} loadingSettings={loadingSettings} />}
         </div>
       </div>
     </div>

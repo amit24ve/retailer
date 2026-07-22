@@ -1,105 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../services/api';
-import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
-  MagnifyingGlassIcon, PlusIcon, FunnelIcon, ChevronDownIcon,
-  ArrowUpIcon, ArrowDownIcon, ArrowsUpDownIcon, QuestionMarkCircleIcon,
-  UserGroupIcon, SparklesIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon,
+  MagnifyingGlassIcon, PlusIcon, ChevronDownIcon,
+  ArrowsUpDownIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon,
   CalendarIcon,
 } from '@heroicons/react/24/outline';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Cell, PieChart, Pie, Legend,
+  ResponsiveContainer, CartesianGrid, Cell, PieChart, Pie,
 } from 'recharts';
 import CustomerModal from '../../components/customers/CustomerModal';
-
-// ─── Mock data ────────────────────────────────────────────────────────────────
-const MOCK_CUSTOMERS = (() => {
-  const tiers = ['Silver', 'Gold', 'Platinum', 'Diamond'];
-  const names = [
-    'Siddharth Sharma', 'Priya Patel', 'Rahul Gupta', 'Anjali Singh',
-    'Vikram Mehta', 'Neha Joshi', 'Arjun Kumar', 'Deepa Nair',
-    'Rohan Kapoor', 'Sneha Reddy', 'Kiran Bose', 'Manish Tiwari',
-    'Pooja Verma', 'Suresh Nair', 'Divya Menon', 'Amit Sharma',
-  ];
-  return names.map((name, i) => ({
-    customer_id: `cust-${i}`,
-    name,
-    email: `${name.split(' ')[0].toLowerCase()}@email.com`,
-    mobile: `+9198765${String(43210 + i).padStart(5, '0')}`,
-    loyalty_tier: tiers[i % 4],
-    lifetime_value: Math.floor(Math.random() * 180000) + 5000,
-    current_points_balance: Math.floor(Math.random() * 5000),
-    churn_probability: Math.random() * 0.92,
-    status: i % 8 === 0 ? 'churned' : i % 5 === 0 ? 'inactive' : 'active',
-    created_at: new Date(Date.now() - Math.random() * 1.2e10).toISOString(),
-    last_purchase_date: new Date(Date.now() - Math.random() * 6e9).toISOString(),
-    city: ['Delhi', 'Mumbai', 'Bangalore', 'Pune', 'Hyderabad'][i % 5],
-    total_orders: Math.floor(Math.random() * 40) + 1,
-    segment: ['Champions', 'Loyal', 'Potential', 'At Risk', 'Lost'][i % 5],
-  }));
-})();
-
-const OVERVIEW_CHART_DATA = [
-  { month: 'Jul', new: 320, repeat: 840 },
-  { month: 'Aug', new: 410, repeat: 920 },
-  { month: 'Sep', new: 380, repeat: 1010 },
-  { month: 'Oct', new: 520, repeat: 1140 },
-  { month: 'Nov', new: 680, repeat: 1320 },
-  { month: 'Dec', new: 890, repeat: 1480 },
-  { month: 'Jan', new: 720, repeat: 1280 },
-  { month: 'Feb', new: 640, repeat: 1190 },
-  { month: 'Mar', new: 810, repeat: 1420 },
-  { month: 'Apr', new: 760, repeat: 1560 },
-  { month: 'May', new: 930, repeat: 1740 },
-  { month: 'Jun', new: 342, repeat: 906 },
-];
-
-const WEEKDAY_DATA = [
-  { day: 'Mon', customers: 820 },
-  { day: 'Tue', customers: 740 },
-  { day: 'Wed', customers: 910 },
-  { day: 'Thu', customers: 860 },
-  { day: 'Fri', customers: 1240 },
-  { day: 'Sat', customers: 1820 },
-  { day: 'Sun', customers: 1640 },
-];
-
-const TIER_PIE = [
-  { name: 'Silver', value: 840, color: '#94a3b8' },
-  { name: 'Gold', value: 310, color: '#f59e0b' },
-  { name: 'Platinum', value: 82, color: '#c9b96e' },
-  { name: 'Diamond', value: 16, color: '#06b6d4' },
-];
-
-const SEGMENT_DATA = [
-  { name: 'Champions', value: 2840, color: '#c9b96e', desc: 'High frequency, high spend' },
-  { name: 'Loyal', value: 5120, color: '#c9b96e', desc: 'Regular visitors' },
-  { name: 'Potential', value: 8400, color: '#f59e0b', desc: 'Growing engagement' },
-  { name: 'At Risk', value: 3200, color: '#f97316', desc: 'Declining activity' },
-  { name: 'Lost', value: 1840, color: '#ef4444', desc: 'No recent purchase' },
-];
-
-const CITY_DATA = [
-  { city: 'Delhi', customers: 4280, pct: 34 },
-  { city: 'Mumbai', customers: 3120, pct: 25 },
-  { city: 'Bangalore', customers: 2840, pct: 23 },
-  { city: 'Pune', customers: 1240, pct: 10 },
-  { city: 'Hyderabad', customers: 920, pct: 7 },
-];
-
-const ACTIVITY_LOG = [
-  { id: 'a1', name: 'Siddharth Sharma', action: 'Made a purchase', amount: '₹4,280', store: 'Delhi Flagship', time: '2 min ago', type: 'purchase', tier: 'Diamond' },
-  { id: 'a2', name: 'Priya Patel', action: 'Redeemed 500 points', amount: '₹50 off', store: 'Mumbai Colaba', time: '8 min ago', type: 'redeem', tier: 'Gold' },
-  { id: 'a3', name: 'Rahul Gupta', action: 'Tier upgraded to Platinum', amount: '', store: '', time: '22 min ago', type: 'upgrade', tier: 'Platinum' },
-  { id: 'a4', name: 'Anjali Singh', action: 'New signup', amount: '', store: 'Online', time: '35 min ago', type: 'signup', tier: 'Silver' },
-  { id: 'a5', name: 'Vikram Mehta', action: 'Coupon GOLD15 redeemed', amount: '15% off', store: 'Pune Camp', time: '1 hr ago', type: 'coupon', tier: 'Gold' },
-  { id: 'a6', name: 'Neha Joshi', action: 'WhatsApp message delivered', amount: '', store: '', time: '1 hr ago', type: 'whatsapp', tier: 'Silver' },
-  { id: 'a7', name: 'Arjun Kumar', action: 'Made a purchase', amount: '₹2,100', store: 'Bangalore Indiranagar', time: '2 hrs ago', type: 'purchase', tier: 'Silver' },
-  { id: 'a8', name: 'Deepa Nair', action: 'Birthday offer claimed', amount: '₹200 off', store: 'Online', time: '3 hrs ago', type: 'coupon', tier: 'Platinum' },
-];
 
 // ─── Tiny helpers ─────────────────────────────────────────────────────────────
 const ChartTip = ({ active, payload, label }) => {
@@ -139,6 +51,34 @@ const ACT_STYLE = {
   coupon:   { bg: 'bg-pink-100',   icon: '🎟️', color: 'text-pink-700' },
   whatsapp: { bg: 'bg-cyan-100',  icon: '💬', color: 'text-amber-700' },
 };
+
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const getPurchaseCount = (customer) => Number(customer?.total_orders ?? customer?.total_purchases ?? 0);
+
+const getOrderAmount = (order) => Number(order?.net_amount || order?.gross_amount || order?.amount || 0);
+
+const getCustomerKey = (value) => {
+  if (!value) return '';
+  return String(value).replace(/\D/g, '').slice(-10) || String(value);
+};
+
+const getCustomerLookupKey = (customer) => (
+  customer?.customer_id || getCustomerKey(customer?.mobile) || customer?.mobile || ''
+);
+
+const getOrderCustomerKey = (order) => (
+  order?.customer_id || getCustomerKey(order?.customer_mobile) || order?.customer_mobile || ''
+);
+
+const weekdayIndex = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return -1;
+  const day = date.getDay();
+  return day === 0 ? 6 : day - 1;
+};
+
+const emptyWeekdayData = () => WEEKDAYS.map(day => ({ day, customers: 0 }));
 
 // ─── "Surfing" empty-state illustration ──────────────────────────────────────
 function SurfingIllustration() {
@@ -252,7 +192,8 @@ function DateRangeSelect({ value, onChange, options, startDate, endDate, onStart
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
-function OverviewTab({ customers = [], total = 0, loading = false }) {
+function OverviewTab({ customers = [], orders = [], total = 0 }) {
+  const [rangeNow] = useState(() => Date.now());
   const [snapshotRange, setSnapshotRange] = useState('month');
   const [newRepeatRange, setNewRepeatRange] = useState('month');
 
@@ -282,14 +223,13 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
 
   // Filter customers by selected range dynamically
   const filterByRange = (list, range, customStart, customEnd) => {
-    const now = Date.now();
     let days = 30;
     if (range === 'week') days = 7;
     else if (range === 'month') days = 30;
     else if (range === 'year') days = 365;
     else if (range === 'custom') {
       const startMs = customStart ? new Date(customStart).getTime() : 0;
-      const endMs = customEnd ? new Date(customEnd + 'T23:59:59').getTime() : Date.now();
+      const endMs = customEnd ? new Date(customEnd + 'T23:59:59').getTime() : rangeNow;
       return list.filter(c => {
         if (!c.created_at) return false;
         const t = new Date(c.created_at).getTime();
@@ -297,7 +237,7 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
       });
     }
     
-    const cutoff = now - (days * 24 * 60 * 60 * 1000);
+    const cutoff = rangeNow - (days * 24 * 60 * 60 * 1000);
     return list.filter(c => c.created_at && new Date(c.created_at).getTime() >= cutoff);
   };
 
@@ -306,7 +246,7 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
 
   const totalCustomers = total;
   const newCustomers = filteredSnapshotCustomers.length;
-  const repeatCustomers = filteredSnapshotCustomers.filter(c => (c.total_orders || 0) > 1).length;
+  const repeatCustomers = filteredSnapshotCustomers.filter(c => getPurchaseCount(c) > 1).length;
 
   const getDynamicChartData = (filteredList) => {
     const months = ['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
@@ -317,7 +257,7 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
       const mLabel = date.toLocaleDateString('en-US', { month: 'short' });
       const idx = months.indexOf(mLabel);
       if (idx !== -1) {
-        if ((c.total_orders || 0) > 1) {
+        if (getPurchaseCount(c) > 1) {
           chartData[idx].repeat += 1;
         } else {
           chartData[idx].new += 1;
@@ -328,42 +268,69 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
   };
   const overviewChartData = getDynamicChartData(filteredNewRepeatCustomers);
 
-  const getDynamicWeekdayData = (filteredList) => {
-    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const counts = weekdays.map(day => ({ day, customers: 0 }));
-    filteredList.forEach(c => {
-      if (c.created_at) {
-        let dayIdx = new Date(c.created_at).getDay();
-        dayIdx = dayIdx === 0 ? 6 : dayIdx - 1;
-        counts[dayIdx].customers += 1;
-      }
+  const getDynamicWeekdayData = (filteredCustomers, orderList) => {
+    const counts = emptyWeekdayData();
+    const source = orderList.length ? orderList : filteredCustomers;
+    source.forEach(item => {
+      const idx = weekdayIndex(item.created_at || item.last_purchase_date);
+      if (idx >= 0) counts[idx].customers += 1;
     });
     return counts;
   };
-  const weekdayData = getDynamicWeekdayData(filteredSnapshotCustomers);
+  const weekdayData = getDynamicWeekdayData(filteredSnapshotCustomers, orders);
+  const totalWeekdayCustomers = weekdayData.reduce((sum, day) => sum + day.customers, 0);
+  const weekendCustomers = weekdayData[5].customers + weekdayData[6].customers;
+  const weekendPct = totalWeekdayCustomers ? Math.round((weekendCustomers / totalWeekdayCustomers) * 100) : 0;
+  const preferredDayType = weekendPct >= 50 ? 'weekends' : 'weekdays';
+  const preferredDayPct = weekendPct >= 50 ? weekendPct : 100 - weekendPct;
 
-  const getDynamicTierPie = (filteredList) => {
-    const tiers = {
-      'Silver': { value: 0, color: '#94a3b8' },
-      'Gold': { value: 0, color: '#f59e0b' },
-      'Platinum': { value: 0, color: '#c9b96e' },
-      'Diamond': { value: 0, color: '#06b6d4' },
-    };
-    filteredList.forEach(c => {
-      const t = c.loyalty_tier || 'Silver';
-      if (tiers[t]) {
-        tiers[t].value += 1;
-      } else {
-        tiers['Silver'].value += 1;
-      }
+  const getSpendComparison = () => {
+    if (!orders.length) {
+      const newCustomers = customers.filter(c => getPurchaseCount(c) <= 1);
+      const repeatCustomers = customers.filter(c => getPurchaseCount(c) > 1);
+      const averageLtv = (list) => {
+        const buyers = list.filter(c => Number(c.lifetime_value || 0) > 0);
+        const totalSpend = buyers.reduce((sum, c) => sum + Number(c.lifetime_value || 0), 0);
+        const totalOrders = buyers.reduce((sum, c) => sum + Math.max(getPurchaseCount(c), 1), 0);
+        return totalOrders ? Math.round(totalSpend / totalOrders) : 0;
+      };
+      const newAvg = averageLtv(newCustomers);
+      const repeatAvg = averageLtv(repeatCustomers);
+      return { newAvg, repeatAvg };
+    }
+
+    const customerByKey = new Map(customers.map(customer => [getCustomerLookupKey(customer), customer]));
+    const orderCounts = new Map();
+    orders.forEach(order => {
+      const key = getOrderCustomerKey(order);
+      if (key) orderCounts.set(key, (orderCounts.get(key) || 0) + 1);
     });
-    return Object.keys(tiers).map(name => ({
-      name,
-      value: tiers[name].value,
-      color: tiers[name].color
-    }));
+
+    const totals = {
+      new: { amount: 0, count: 0 },
+      repeat: { amount: 0, count: 0 },
+    };
+
+    orders.forEach(order => {
+      const key = getOrderCustomerKey(order);
+      const customer = customerByKey.get(key);
+      const purchaseCount = Math.max(getPurchaseCount(customer), orderCounts.get(key) || 0);
+      const bucket = purchaseCount > 1 ? 'repeat' : 'new';
+      totals[bucket].amount += getOrderAmount(order);
+      totals[bucket].count += 1;
+    });
+
+    return {
+      newAvg: totals.new.count ? Math.round(totals.new.amount / totals.new.count) : 0,
+      repeatAvg: totals.repeat.count ? Math.round(totals.repeat.amount / totals.repeat.count) : 0,
+    };
   };
-  const tierPie = getDynamicTierPie(filteredSnapshotCustomers);
+
+  const spendComparison = getSpendComparison();
+  const maxSpend = Math.max(spendComparison.newAvg, spendComparison.repeatAvg, 1);
+  const repeatSpendLift = spendComparison.newAvg > 0
+    ? Math.round(((spendComparison.repeatAvg - spendComparison.newAvg) / spendComparison.newAvg) * 100)
+    : 0;
 
   const getDynamicCityData = (filteredList) => {
     const citiesMap = {};
@@ -500,18 +467,16 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
               <p className="text-sm font-bold text-slate-700">Customers By Day</p>
             </div>
             <p className="text-3xl font-black text-amber-600 mb-1">
-              {weekdayData.reduce((s, d) => s + d.customers, 0) > 0 
-                ? `${Math.round((weekdayData[5].customers + weekdayData[6].customers) / weekdayData.reduce((s, d) => s + d.customers, 0) * 100)}%`
-                : '0%'}
+              {preferredDayPct}%
             </p>
-            <p className="text-sm text-slate-600 mb-4">Customers visit more on <span className="font-bold text-amber-700">weekends</span></p>
+            <p className="text-sm text-slate-600 mb-4">Customers visit more on <span className="font-bold text-amber-700">{preferredDayType}</span></p>
 
             <ResponsiveContainer width="100%" height={100}>
-              <BarChart data={WEEKDAY_DATA} barCategoryGap="20%">
+              <BarChart data={weekdayData} barCategoryGap="20%">
                 <XAxis dataKey="day" tick={{ fill: '#c9b96e', fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTip />} />
                 <Bar dataKey="customers" name="Customers" radius={[4, 4, 0, 0]}>
-                  {WEEKDAY_DATA.map((d, i) => (
+                  {weekdayData.map((d, i) => (
                     <Cell key={i} fill={i >= 5 ? '#c9b96e' : '#c4b5fd'} />
                   ))}
                 </Bar>
@@ -526,14 +491,14 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
           {/* Average spend by repeat customers */}
           <div className="rounded-2xl p-5 border border-slate-200" style={{ background: 'linear-gradient(135deg, #f0fdf9 0%, #ccfbf1 100%)' }}>
             <p className="text-sm font-bold text-slate-700 mb-2">Average spend by repeat customers</p>
-            <p className="text-3xl font-black text-amber-700 mb-1">+18%</p>
+            <p className="text-3xl font-black text-amber-700 mb-1">{repeatSpendLift > 0 ? `+${repeatSpendLift}%` : `${repeatSpendLift}%`}</p>
             <p className="text-sm text-slate-600 mb-4">More spend on every order by <span className="font-bold text-amber-800">repeat customers</span></p>
 
             {/* Comparison bar */}
             <div className="space-y-3">
               {[
-                { label: 'New Customers', value: 2100, max: 4200, color: '#94a3b8' },
-                { label: 'Repeat Customers', value: 3680, max: 4200, color: '#a89442' },
+                { label: 'New Customers', value: spendComparison.newAvg, max: maxSpend, color: '#94a3b8' },
+                { label: 'Repeat Customers', value: spendComparison.repeatAvg, max: maxSpend, color: '#a89442' },
               ].map(bar => (
                 <div key={bar.label}>
                   <div className="flex justify-between text-xs mb-1">
@@ -598,7 +563,7 @@ function OverviewTab({ customers = [], total = 0, loading = false }) {
 }
 
 // ─── Segmentation Tab ─────────────────────────────────────────────────────────
-function SegmentationTab({ customers = [], total = 0 }) {
+function SegmentationTab({ customers = [] }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [selected, setSelected] = useState('Champions');
@@ -813,7 +778,6 @@ function CustomerListTab({ onAddCustomer }) {
   const limit = 12;
 
   useEffect(() => {
-    setLoading(true);
     api.get('/customers', { params: { page, limit, search, tier } })
       .then(r => { setCustomers(r.data.customers || []); setTotal(r.data.total || 0); })
       .catch(() => { setCustomers([]); setTotal(0); })
@@ -1082,17 +1046,25 @@ export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [showModal, setShowModal] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/customers', { params: { limit: 1000 } })
-      .then(r => {
-        setCustomers(r.data.customers || []);
-        setTotal(r.data.total || 0);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.get('/customers', { params: { limit: 1000 } })
+        .then(r => {
+          setCustomers(r.data.customers || []);
+          setTotal(r.data.total || 0);
+        })
+        .catch(() => {
+          setCustomers([]);
+          setTotal(0);
+        }),
+      api.get('/orders')
+        .then(r => setOrders(r.data.orders || []))
+        .catch(() => setOrders([])),
+    ]).finally(() => setLoading(false));
   }, []);
 
   const TABS = [
@@ -1131,8 +1103,8 @@ export default function CustomersPage() {
       </div>
 
       {/* ── Tab content ── */}
-      {activeTab === 'overview'     && <OverviewTab customers={customers} total={total} loading={loading} />}
-      {activeTab === 'segmentation' && <SegmentationTab customers={customers} total={total} />}
+      {activeTab === 'overview'     && <OverviewTab customers={customers} orders={orders} total={total} loading={loading} />}
+      {activeTab === 'segmentation' && <SegmentationTab customers={customers} />}
       {activeTab === 'list'         && <CustomerListTab onAddCustomer={() => setShowModal(true)} />}
       {activeTab === 'activity'     && <ActivityTab customers={customers} />}
 
@@ -1146,5 +1118,3 @@ export default function CustomersPage() {
     </div>
   );
 }
-
-
